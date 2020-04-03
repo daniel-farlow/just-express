@@ -533,7 +533,381 @@ In the above script, the main "gotcha" is when we try to read in a file that req
 
 ## Express 101
 
-TBD
+<details><summary> <strong>What is Express and why should we care?</strong></summary>
+
+If we visit [the Express website](https://expressjs.com/), then we are greeted with the following:
+
+> Express: Fast, unopinionated, minimalist web framework for Node.js
+
+What does this mean? Well, let's first make it clear that Express is literally "just" a node module. That is, we cannot have Express without Node even though we can have Node without Express (as painful as that might be).
+
+The "fast" part is debatable because everything is fast until it's not. But Express has put in a lot of work to trim things down and make it as lean and lightweight as possible. The "unopinionated" is a market-friendly word but sometimes it's good and sometimes it's bad. Basically, "unopinionated" means they don't force things on you. Rails is basically the opposite--they make decisions for you like sort of corralling you into using Postgres. The "framework" element is mostly a remark on how the Express architects have tried to make everything that one might commonly use when employing Node in an application. 
+
+There are a lot of reasons to use Express. One of the obvious reasons (or it will be obvious) is all of the utilities Express gives us to avoid a lot of the torment we had to endure previously when trying to serve things up and route stuff in Node. Web applications can be made quickly and easily with Express. There are lots of templating engines for Express like Jade/Pug, EJS, Handlebars, etc. Express truly shines in building APIs. It's almost unfair how quickly and easily you can build one and process JSON and respond with JSON. 
+
+---
+
+</details>
+
+<details><summary> <strong>Basic Express server (reworking the Node server in Express)</strong></summary>
+
+Recall the most basic Node server we set up:
+
+<details><summary> Most basic Node server code for reference</summary>
+
+```javascript
+// nodeServer.js
+const http = require('http');
+
+const server = http.createServer((req, res) => {
+    res.writeHead(200, {'content-type': 'text/html'});  
+    res.write('<h1>Hello, World!</h1>');                
+    res.end();                                          
+})
+
+server.listen(3000);
+```
+
+---
+
+</details>
+
+We will now recreate the above basic server in Express.
+
+Recall that previously we could just write `const http = require('http');` because the HTTP module is native to Node. Well, the Express module is *not* native to Node. It is a third-party module and thus we need to install it with NPM. So we need to have a `package.json` file in our folder structure. 
+
+| Installing a new node module and where it is saved |
+| :--- |
+| When you install a new node module, it is going to install itself relative to the first `package.json` it finds. It will put itself in the `node_modules` folder. |
+
+The best way to handle this is to run `npm init` inside of whatever folder your project is in where your node modules should be located (generally at the root-level). 
+
+Since we want to use the Express module, we will execute `npm install express` which then adds a bunch of different dependencies to the `node_modules` folder. Subsequently, we can use the Express module just as we use other modules:
+
+```javascript
+const express = require('express');
+const app = express();
+```
+
+In almost all Express applications, you will include the line `const app = express();` as well. What do these lines do? Well, the `express` variable declared above holds whatever has been exported by the `express` node module. If you look in the `node_modules` folder for `express`, then you can inspect it to see what is being exported (from its `index.js` file). We find the following in `index.js`:
+
+``` JS
+module.exports = require('./lib/express');
+```
+
+So now we open the `lib` folder inside of the `express` module and look at the `express.js` file. Lots of stuff is being exported but the thing we are interested in is this line which contains what is being exported by default:
+
+```javascript
+exports = module.exports = createApplication;;
+```
+
+What is `createApplication`? It is a function in that file:
+
+```javascript
+function createApplication() {
+  var app = function(req, res, next) {
+    app.handle(req, res, next);
+  };
+
+  mixin(app, EventEmitter.prototype, false);
+  mixin(app, proto, false);
+
+  // expose the prototype that will get set on requests
+  app.request = Object.create(req, {
+    app: { configurable: true, enumerable: true, writable: true, value: app }
+  })
+
+  // expose the prototype that will get set on responses
+  app.response = Object.create(res, {
+    app: { configurable: true, enumerable: true, writable: true, value: app }
+  })
+
+  app.init();
+  return app;
+}
+```
+
+So basically write `const express = require('express');` is equivalent to writing `const express = createApplication;`. So when we write `const app = express();` what we are really doing is invoking the `createApplication` function. 
+
+The point of all of this, which may seem like just a bunch of rigmarole, is to train ourselves to think about what is really going on under the hood so we can better inspect problems we may encounter and understand boilerplate syntax.
+
+As noted in [the docs](https://expressjs.com/en/4x/api.html#app.all), the Express `app` comes with a whole bunch of methods, one of which is `all`, which takes two arguments, the first being a route or path and the second being a callback function to invoke if the path specified as the first argument is requested, where the callback accepts three arguments: `req`, `res`, and `next`. The first two we are already acquainted with and the `next` one we will become more acquainted with when we start looking at middleware. 
+
+Let's use `app.all` in a very generic way:
+
+```javascript
+app.all('*', (req, res, next) => {
+  res.send(`<h1>This is the home page!</h1>`)
+})
+```
+
+Some things to note here: The `'*'` means we will listen for HTTP traffic for *any* route on the specified port, much as we did previously. The very first win is that Express handles the basic headers (i.e., status code, mime-type; we may have to modify them once we get fancy) which is awesome. Another awesome win is that Express handles closing the connection so we do not manually need to do something like `res.end()`. What we need to deal with is the in-between. We need to come up with the `response` body we want to send back to the requestor. As [the docs](https://expressjs.com/en/4x/api.html#res.send) note, we will not use `res.write` but `res.send`. 
+
+Finally, the last thing we need to do, as noted in [the docs](https://expressjs.com/en/4x/api.html#app.listen), is `app.listen` instead of `server.listen`. 
+
+In sum, we have the following basic servers in Node and Express, respectively:
+
+```javascript
+// nodeServer.js
+const http = require('http');
+
+const server = http.createServer((req, res) => {
+    res.writeHead(200, {'content-type': 'text/html'});  
+    res.write('<h1>Hello, World!</h1>');                
+    res.end();                                          
+})
+
+server.listen(3000);
+
+///////////////////////////////////////////////////////
+
+// expressServer.js
+const express = require('express');
+const app = express();
+
+app.all('*', (req, res, next) => {
+  res.send(`<h1>This is the home page!</h1>`)
+})
+
+app.listen(3000);
+```
+
+---
+
+</details>
+
+<details><summary> <strong>Basic Express routing concepts and implementation</strong></summary>
+
+We will recreate the plain Node server that served static files in a bit but we should get some basic routing concepts down from Express. 
+
+To get started, we can immediately include the `express` module since we are inside the same directory in which `express` was installed before and we can go ahead and plan to listen on port 3000:
+
+```javascript
+const express = require('express');
+const app = express();
+
+// routing and other stuff
+
+app.listen(3000);
+```
+
+As can be seen in [the docs](https://expressjs.com/en/4x/api.html#app.all), `app` has a ton of methods (but we are especially interested right now in the ones in bold):
+
+- **`app.all()`**
+- **`app.delete()`**
+- `app.disable()`
+- `app.disabled()`
+- `app.enable()`
+- `app.enabled()`
+- `app.engine()`
+- `app.get()`
+- **`app.get()`**
+- `app.listen()`
+- `app.METHOD()`
+- `app.param()`
+- `app.path()`
+- **`app.post()`**
+- **`app.put()`**
+- `app.render()`
+- `app.route()`
+- `app.set()`
+- `app.use()`
+
+We are interested in the bolded ones because they correspond to HTTP verbs! REST verbs! Worth noting is that when you make an HTTP request you are making a *specific* type of HTTP request. We can easily see these methods correspond to what many people would think of as a CRUD application where you can create, read, update, and delete, all of which correspond to `app.post`, `app.get`, `app.put`, and `app.delete`, respectively. (The `app.all` method simply accepts any type of request.)
+
+Of course, a `GET` request is the default for all browsers. This is why a tool like [Postman](https://www.postman.com/downloads/) is so useful. You can make all sorts of requests besides a `GET` request (even though you can do that too of course). 
+
+So the application methods we want to focus on right now are the following:
+
+- `app.all()`
+- `app.delete()`
+- `app.get()`
+- `app.post()`
+- `app.put()`
+
+Each of these methods takes two arguments, the first being a route or path and the second being a callback function to invoke if an HTTP request is made to the first argument (i.e., the route or path) with a verb that matches the application method name for that route; that is, something like
+
+```javascript
+app.post('/post-something', (req, res, next) => {
+    res.send(`<h1>I tried to POST something!</h1>`)
+})
+```
+
+indicates that we are looking out for an HTTP request to the `post-something` route where the HTTP request is specifically a `POST` request. 
+
+The great thing is we can handle all types of requests on the same path/route with very little overhead. The callbacks for the routes will only respond when a request is made to the specified path and the request is of a type equivalent to the application method being used as above with `post`. This is great news!
+
+The point here is that the routing system in Express is meant to handle two things, namely the type of HTTP request and also the path you actually want to fetch. The application methods are named to correspond with the HTTP verbs they are looking out for. 
+
+Express works from the top down. That is, as soon as we have sent a response, subsequent matching routes won't get run (unless we explicitly architect it in a way to do this). 
+
+---
+
+</details>
+
+<details><summary> <strong>Basic Express server with routing (reworking the Node server in Express)</strong></summary>
+
+Recall the basic albeit tedious Node server we set up that handled basic routing:
+
+<details><summary> Basic plain Node server with basic routing</summary>
+
+```javascript
+// nodeServerTwo.js
+const http = require('http');  
+const fs = require('fs');       
+
+const server = http.createServer((req, res) => {
+    if (req.url === '/') { 
+        res.writeHead(200, { 'content-type': 'text/html' });
+        const homePageHTML = fs.readFileSync('node.html');
+        res.write(homePageHTML);
+        res.end();
+    } else if (req.url === "/node.png") {
+        res.writeHead(200, { 'content-type': 'image/png' });
+        const image = fs.readFileSync('node.png');
+        res.write(image);
+        res.end();
+    } else if (req.url === "/styles.css") {
+        res.writeHead(200, { 'content-type': 'text/css' });
+        const css = fs.readFileSync('styles.css');
+        res.write(css);
+        res.end();
+    } else {
+        res.writeHead(404, { 'content-type': 'text/html' });
+        res.write(`<h4>Sorry, this isn't the page you're looking for!</h4>`)
+        res.end()
+    }
+});
+
+server.listen(3000);
+```
+
+---
+
+</details>
+
+Using the routing concepts discussed in the previous note, we will now try to recreate the plain Node server above but in Express.
+
+For us to accomplish this, we will start by noting that `app` comes with a `use` method. Per [the docs](https://expressjs.com/en/4x/api.html#app.use), the `app.use([path,] callback [, callback...])` syntax results in mounting the specified middleware function or functions at the specified path: the middleware function is executed when the base of the requested path matches `path`. 
+
+In our specific use case, we will not explicitly provide the path or callback but instead pass something a built-in middleware function in Express, namely `express.static('public')`. As noted in [the docs](https://expressjs.com/en/4x/api.html#express.static) for `express.static(root, [options])`: This is a built-in middleware function in Express. It serves static files and is based on [serve-static](http://expressjs.com/en/resources/middleware/serve-static.html). The `root` argument specifies the root directory from which to serve static assets. The function determines the file to serve by combining `req.url` with the provided root directory. When a file is not found, instead of sending a 404 response, it instead calls `next()` to move on to the next middleware, allowing for stacking and fall-backs. (See the rest of the docs for more details as well as adding options to `express.static`.)
+
+Worth noting is how `express.static` actually works in light of how most Express applications begin:
+
+```javascript
+const express = require('express');
+const app = express();
+```
+
+We noted previously how the `createApplication` function is the default export from `express` module. But there are several other exports, one of which is the `static` method we are now going to use. If we look in the `node_modules` folder as we did before, then we will see the following lines among others:
+
+```javascript
+/**
+ * Expose middleware
+ */
+
+exports.json = bodyParser.json
+exports.query = require('./middleware/query');
+exports.raw = bodyParser.raw
+exports.static = require('serve-static');
+exports.text = bodyParser.text
+exports.urlencoded = bodyParser.urlencoded
+```
+
+Right now, of course, we are interested in the `exports.static = require('serve-static');` line. We can see how `express.static` is based on the `serve-static` module. We could inspect the `serve-static` module and see what the default export is (it's the function `serveStatic`), but we will not go into the details here. The important thing is that we can pass this function a directory name, say `public` as is often the case, and anytime anybody wants to see a resource located in `public`, we do not have to worry about routing or anything like that. 
+
+| Note about how `express.static` works and serving up tons of files |
+| :--- |
+| Some people actually use `express.static` to serve up entire front-end sites. If using `express.static('public')`, you could drop an entire front-end site into the `public` folder and you're done. You don't have to deal with many headaches you might have to otherwise endure. You *do not* (and *should not*) put `public` in front of the path to the resource you want to access that is being statically served. For example, if `node.png` is in the `public` folder and we are listening on port 3000, then we can access this picture by going to `localhost:3000/node.png` instead of `localhost:3000/public/node.png`.<br><br>For the sake of clarity, although you would never do this in practice, you could also have `app.use(express.static('node_modules'))` and then you'd be statically serving up all the files in the `node_modules` folder. And then we could access whichever one we want, say the `HISTORY.md` one in the `accepts` node module, like so: `localhost:3000/accepts/HISTORY.md`.<br><br>The point is that if we execute `app.use(express.static('folder-name'))` then the server knows that everything in `folder-name` is going to be served up as part of the root domain. It's worth noting too that you can have as many `app.use(express.static('folder-name'))` commands as you want; that is, you can statically serve the contents of as many folders as you want. Do take care, however, that you do not statically serve something that should not be readily accessible. This is why the convention is to name the folder `public` whose contents you want to be made publicly available. Typically, the stuff you would want to be statically served are things like stylesheets, images, etc. |
+
+To fully recreate our Node server, we will not use Node to read in our `node.html` file with the `fs` module but instead use the `sendFile` method on the `response` object to achieve the same thing (courtesy of the native `path` module so we can use an absolute path which is required). That is, instead of having to deal with 
+
+```javascript
+if (req.url === '/') { 
+  res.writeHead(200, { 'content-type': 'text/html' });
+  const homePageHTML = fs.readFileSync('node.html');
+  res.write(homePageHTML);
+  res.end();
+}
+```
+
+we will simply have something like the following:
+
+```javascript
+app.all('/', (req, res) => {
+    res.sendFile(path.join(__dirname + '/node.html'));
+}) 
+```
+
+It's very uncommon to do something like `res.sendFile`; instead, typically you would do something like `res.render`, but we have not gotten to templates yet which will make that feasible. 
+
+| Note about `__dirname` |
+| :--- |
+| As noted on [a Stack Overflow thread](https://stackoverflow.com/q/8817423/5209533), `__dirname` is only defined in scripts (i.e., `.js` files). It's not available in the Node REPL. Basically, `__dirname` means "the directory of this script." In REPL, you do not have a script. Hence, `__dirname` would not have any real meaning. It's too bad this is the case because loading a script file while inside the REPL using `.load` will result in an error if you used `__dirname` in your script. One way to get around this is, inside of the REPL, do something like `__dirname = process.cwd()`. In fact, in light of this, instead of using `path.join(__dirname + '/node.html')` as we did above, we could just as well use `process.cwd() + '/node.html'` as the argument to `res.sendFile`. There's a lot more about `process` and its available methods in [the docs](https://nodejs.org/dist/latest-v12.x/docs/api/process.html). Always look at the docs. |
+
+Recapping, we have the following two equivalent ways of handling the basic routes and serving up static files:
+
+Using Express:
+
+```javascript
+// expressServerTwo.js
+const express = require('express');
+const app = express();
+
+app.use(express.static('public'));
+
+app.all('/', (req, res) => {
+    res.sendFile(process.cwd() + '/node.html');
+}) 
+
+app.all('*', (req,res) => {
+    res.send(`<h1>Sorry, this page does not exist</h1>`)
+})
+
+app.listen(3000);
+```
+
+Using plain Node:
+
+```javascript
+// nodeServerTwo.js
+const http = require('http');  
+const fs = require('fs');       
+
+const server = http.createServer((req, res) => {
+    if (req.url === '/') { 
+        res.writeHead(200, { 'content-type': 'text/html' });
+        const homePageHTML = fs.readFileSync('node.html');
+        res.write(homePageHTML);
+        res.end();
+    } else if (req.url === "/node.png") {
+        res.writeHead(200, { 'content-type': 'image/png' });
+        const image = fs.readFileSync('node.png');
+        res.write(image);
+        res.end();
+    } else if (req.url === "/styles.css") {
+        res.writeHead(200, { 'content-type': 'text/css' });
+        const css = fs.readFileSync('styles.css');
+        res.write(css);
+        res.end();
+    } else {
+        res.writeHead(404, { 'content-type': 'text/html' });
+        res.write(`<h4>Sorry, this isn't the page you're looking for!</h4>`)
+        res.end()
+    }
+});
+
+server.listen(3000);
+```
+
+Hopefully it is clear just how much nicer Express is to work with and how much easier we could get things to scale if we wanted or needed to.
+
+---
+
+</details>
+
+
+
 
 ## Course Questions to Follow Up On
 
