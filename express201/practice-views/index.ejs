@@ -1,0 +1,7 @@
+<h2><%= bannerMsg %></h2>
+<h2><%= _locals.bannerMsg %></h2>
+
+<p style=<%= userType === 'premium' ? 'color:green;' : 'color:red;' %>> <%= greetingMsg %> </p>
+
+<h2>The entire locals object</h2>
+<pre><%= JSON.stringify(locals, null, 2) %></pre>
