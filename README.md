@@ -531,7 +531,7 @@ In the above script, the main "gotcha" is when we try to read in a file that req
 
 </details>
 
-## Express 101
+## Express 101 (plain node vs express: basic server, routing, etc.)
 
 <details><summary> <strong>What is Express and why should we care?</strong></summary>
 
@@ -906,9 +906,740 @@ Hopefully it is clear just how much nicer Express is to work with and how much e
 
 </details>
 
+## Express 201 (middleware and rendering)
+
+<details><summary> <strong>Middleware in Express</strong></summary>
+
+Express claims itself to really be two things:
+
+1. A router. We saw several of the possibilities previously with stuff like `apt.post`, `apt.get`, etc.
+2. A series of middleware that comprises a web framework. 
+
+What does the second point really mean? Middleware is something that happens ... in the middle ... of something. What do we do a lot of in web applications? We get requests and send responses. Middleware is stuff we can do between getting the request and sending back the response: `req ---MIDDLEWARE---> res`. In more "Express-ish" terms, a middleware function is ANY function that has access to the `req`, `res`, and `next` objects. That said, basically Express is just a bunch of middleware! It's a whole bunch of little functions working in unison that have access to `req`, `res`, and `next` that slowly piece together a cool web framework (that and a router).
+
+Maybe think of an illustrative example like this:
+
+1. Request comes in
+2. We need to validate the user (sometimes)
+3. We need to store some things in the database
+4. If there is data from the user, then we need to parse it and store it
+5. Respond
+
+Steps 2-4 above are all situations that must be addressed with middleware functions. They are everything that happens between getting the request and firing back a response. 
+
+The response *always* depends on the result. The nature of the dependence (i.e., large or small) could be negligible as we have seen with what we have done so far (i.e., basically sending back some stuff regardless of what kind of request we get). But in some cases it could matter quite a bit (e.g., whether or not a user is validated). The point is that *how* the response is constructed *always* depends on the request in some manner, and Express has a `locals` property on every `response` object intended to effectively capture whatever we want from a specific request--what we capture from the specific incoming `request` can be stored as local variables on the `response` object via `res.locals`. 
+
+As [the docs](https://expressjs.com/en/4x/api.html#res.locals) communicate about `res.locals`: An object that contains response local variables scoped to the request, and therefore available only to the view(s) rendered during that request / response cycle (if any). Otherwise, this property is identical to [app.locals](https://expressjs.com/en/4x/api.html#app.locals). This property is useful for exposing request-level information such as the request path name, authenticated user, user settings, and so on:
+
+```javascript
+// Documentation example usage of how you might want to use res.locals
+app.use(function (req, res, next) {
+  res.locals.user = req.user
+  res.locals.authenticated = !req.user.anonymous
+  next()
+})
+```
+
+Basically, the `response` object has a property called `locals` that is pre-built into Express--it is attached to *every* response, and it will live for the life of the response and it's very useful for passing data over to a template. For now, it is simply nice to know that we will be able to pass `res.locals` around from place to place. Every middleware function will have access to `res.locals` for the life of the response. How? Because every middleware function has access to the `response` object. 
+
+We can illustrate all of this by means of a somewhat phony example involving some `validateUser` middleware:
+
+```javascript
+const express = require('express');
+const app = express();
+
+function validateUser(req, res, next) {
+  res.locals.validated = true;
+  next(); 
+}
+
+// app.use(validateUser);
+app.use('/admin', validateUser);
+app.get('/', validateUser); 
+
+app.get('/', (req, res, next) => {
+  res.send(`<h1>Main Page</h1>`)
+  console.log(`Validated? ${!!res.locals.validated}`);
+})
+
+app.get('/admin', (req, res, next) => {
+  res.send(`<h1>Admin Page</h1>`)
+  console.log(`Validated? ${!!res.locals.validated}`);
+})
+
+app.get('/secret', (req, res, next) => {
+  res.send(`<h1>This is a secret page. Go away!</h1>`);
+  console.log(`Validated? ${!!res.locals.validated}`);
+})
+
+app.use('*', (req, res) => {
+  res.send(`<h1>Woops! Is no good.</h1>`);
+  console.log(`Validated? ${!!res.locals.validated}`);
+})
+
+app.listen(3000);
+```
+
+Let's now unpack some of the stuff from above:
+
+<details><summary> <strong>Artificial use of <code>res.locals</code> in <code>validateUser</code></strong></summary>
+
+As can be seen with our definition of `validateUser` and our use of `res.locals`, no reference is even made to the `request` object. Nearly always the local variables you want on the `response` object will depend, in some way, on the `request` object as the example in the docs shows:
+
+```javascript
+app.use(function (req, res, next) {
+  res.locals.user = req.user
+  res.locals.authenticated = !req.user.anonymous
+  next()
+})
+```
+
+We will get to such common use cases very soon.
+
+---
+
+</details>
+
+<details><summary> <strong>Non-anonymous middleware by defining <code>validateUser</code> globally</strong></summary>
+
+The `validateUser` function seen above is an explicit, named function declaration which is different than much of the other middleware we have used to this point. Since `validateUser` is a function whose signature contains `req`, `res`, and `next`, we should note that something like 
+
+```javascript
+app.get('/', validateUser); 
+```
+
+is basically equivalent to
+
+```javascript
+app.get('/', (req, res, next) => {
+  res.locals.validated = true;
+  next(); 
+})
+```
+
+The main difference is that declaring the `validateUser` middleware globally will give us access to it globally; that is, we can use `validateUser` wherever we want whereas the callback function/middleware in 
+
+```javascript
+app.get('/', (req, res, next) => {
+  res.locals.validated = true;
+  next(); 
+})
+```
+
+is only available when a `GET` request is made to the root. 
+
+---
+
+</details>
+
+<details><summary> <strong>Effect of <code>next()</code></strong></summary>
+
+It is hard to overstate how critical `next()` really is. Suppose we omitted it in our definition of `validateUser`:
+
+```javascript
+...
+function validateUser(req, res, next) {
+  res.locals.validated = true;
+  // next(); 
+}
+
+app.use(validateUser);
+...
+```
+
+What would happen here? Any route that expected us to *use* (i.e., invoke) the `validateUser` function would not actually get around to sending a response. If we actually ran `app.use(validateUser);`, then `validateUser` would be invoked for whatever path we could try to reach, and doing so would result in `validateUser` running but us never actually sending a response back. The browser would just hang. Not good! Don't forget `next()`: you want to hand control off to the next piece of middleware in the cycle (probably the actually routing you have set up).
+
+---
+
+</details>
+
+<details><summary> <strong><code>app.use(validateUser);</code></strong></summary>
+
+The reason `app.use(validateUser);` is commented out is exactly because of its effect: it results in invoking `validateUser` every time *any* HTTP request is made to *any* path (i.e., `validateUser` is used at the "application level"). Of course, in some cases you may want to do this. But the use cases are likely few.
+
+---
+
+</details>
+
+<details><summary> <strong><code>app.use('/admin', validateUser);</code></strong></summary>
+
+The effect of `app.use('/admin', validateUser);` is that we are telling Express to use `validateUser` for *any* type of HTTP request to *only* the `/admin` path. 
+
+---
+
+</details>
+
+<details><summary> <strong><code>app.get('/', validateUser); </code></strong></summary>
+
+The effect of `app.get('/', validateUser);` is that we are telling Express to use `validateUser` only on `GET` requests for only the path `/`.
+
+---
+
+</details>
+
+---
+
+</details>
+
+<details><summary> <strong>Express <code>helmet</code> and other awesome Express middleware</strong></summary>
+
+In this note we will talk about two important methods that belong to the `express` module that have not been used yet, namely `express.json` and `express.urlencoded`, and then one other piece of middleware (from the `helmet` module) that is not native to Express but that we really should always use for security reasons (always wear your `helmet`!).
+
+Looking at [the docs](https://expressjs.com/en/4x/api.html#express), we see a few Express methods we can use:
+
+- `express.json()`
+- `express.raw()`
+- `express.Router()`
+- `express.static()`
+- `express.text()`
+- `express.urlencoded()`
+
+We have already touched on `express.static`, but we want to look at `express.json` and `express.urlencoded` now. We'll look at the others later. Let's start with `express.json`. 
+
+As [the docs](https://expressjs.com/en/4x/api.html#express.json) note, `express.json([options])` is a built-in middleware function in Express. It parses incoming requests with JSON payloads and is based on [body-parser](http://expressjs.com/en/resources/middleware/body-parser.html). Returns middleware that only parses JSON and only looks at requests where the `Content-Type` header matches the `type` option (the default `type` option is `application/json`). This parser accepts any Unicode encoding of the body and supports automatic inflation of `gzip` and `deflate` encodings. A new `body` object containing the parsed data is populated on the `request` object after the middleware (i.e., `req.body`), or an empty object (`{}`) if there was no body to parse, the `Content-Type` was not matched, or an error occurred. 
+
+Read the above excerpt from the docs again (and actually visit [the docs](https://expressjs.com/en/4x/api.html#express.json) for all sorts of good and more detailed information). Since `express.json` is based on `body-parser`, just like `express.static` is based on `serve-static`, we can see that by installing the `express` module we also install the `body-parser` module as a dependency (we cannot use `express.json` without the `body-parser` and `express.json` is *built-in* middleware in Express), we can take a look inside the `express` node module and we will find `body-parser` listed as one of the `dependencies` in the `package.json`. So what does this mean? Well, if someone sends you JSON, meaning the `Content-Type` is going to come through as `application/json` or something along those lines, then `express.json` will kick into action and parse the body for us. Note that any data that comes into any server (via form submission or whatever), even if it's an Express server, is still going to be interpreted as a basic string. It doesn't make any difference. That's how servers work. The string needs to be parsed to be of much use and we can do that thanks to `express.json`. Of course, we will want to use this everywhere in our Express application (not just on select paths or routes) and thus we will use it like so:
+
+```javascript
+app.use(express.json())
+```
+
+Now let's consider `express.urlencoded([options])`. As [the docs](https://expressjs.com/en/4x/api.html#express.urlencoded) note, this is a built-in middleware function in Express. It parses incoming requests with urlencoded payloads and is based on [body-parser](http://expressjs.com/en/resources/middleware/body-parser.html). Returns middleware that only parses urlencoded bodies and only looks at requests where the `Content-Type` header matches the `type` option (the default `type` option is `application/x-www-form-urlencoded`). This parser accepts only UTF-8 encoding of the body and supports automatic inflation of `gzip` and `deflate` encodings. A new `body` object containing the parsed data is populated on the `request` object after the middleware (i.e., `req.body`), or an empty object (`{}`) if there was no body to parse, the `Content-Type` was not matched, or an error occurred. This object will contain key-value pairs, where the value can be a string or array (when `extended` is `false`), or any type (when `extended` is `true`).
+
+We will want to use the `express.urlencoded([options])` middleware at the application level just like `express.json([options])` and it's typically good to set the `extended` property to `false` (the default is `true`) to ensure each value in the key-value pairs that make up the `body` of the `request` (i.e., `req.body`) will be a string or an array: 
+
+```javascript
+app.use(express.urlencoded({extended: false}))
+```
+
+---
+
+</details>
+
+<details><summary> <strong>Example using <code>express.json</code> and <code>express.urlencoded</code> by making an AJAX post request</strong></summary>
+
+To make much of what appeared in the previous note more concrete, consider the following setup: in the root of the project folder, make a `public` folder and create an `ajax.html` file with the following contents:
+
+``` HTML
+<!-- ajax.html -->
+<h1>AJAX test page has been loaded!</h1>
+
+<script src="https://ajax.googleapis.com/ajax/libs/jquery/3.3.1/jquery.min.js"></script>
+
+<script>
+
+  function makeOurRequest() {
+    return $.ajax({
+      method: "POST",
+      url: "http://localhost:3000/ajax",
+      dataType: "text",
+      // dataType: "json",
+      data: {
+        name: "Daniel"
+      }
+    });
+  }
+
+  const theRequest = makeOurRequest();
+
+  theRequest
+    .then(response => console.log(`AJAX request successful! Response: `, JSON.parse(JSON.stringify(response))))
+    .catch(err => console.log(`AJAX request failed! Error: `, err))
+
+</script>
+```
+
+Then at the root of the project folder create a `server.js` file:
+
+```javascript
+const express = require('express');
+const app = express();
+const helmet = require('helmet');
+
+app.use(helmet());
+
+app.use(express.static('public'));
+app.use(express.json());
+app.use(express.urlencoded({extended: false}));
+
+app.post('/ajax', (req, res) => {
+  console.log(req)
+  // console.log(req.headers)
+  res.send('THIS IS A TEST RESPONSE AS PLAIN TEXT') // for dataType: 'text' in ajax request
+  // res.send({message: 'this is a test response as JSON'}) // for dataType: 'json' in ajax request
+});
+
+app.listen(3000);
+```
+
+Let's walk through what happens when you visit `http://localhost:3000/ajax.html`:
+
+- First, we can only access the `ajax.html` file because it is being statically served thanks to `app.use(express.static('public'))`. Once the document is served and loaded, the scripts in the file fire: jQuery is made available to us and then we make an AJAX request with the following properties:
+  + `method: 'POST'`: We are making a post request (which will almost always be the case with form submissions and the like).
+  + `url: "http://localhost:3000/ajax"`: We are making a POST request to the `/ajax` route--Express will be responsible for accepting the request and putting together a response.
+  + `dataType: 'text'` or `dataType:json`: What kind of data are we sending through? 
+  + `data: { name: 'Daniel'}`: The actual data we are sending through.
+  + Finally, once the request has been made, the return value from the AJAX request is a promise. If that promise is resolved or rejected, then we will respond to indicate so and this can be seen in the browser console. 
+- In `server.js`, we have constructed things so that when a `post` request is made to the `ajax` route, we first log the request (and later the request headers specifically) with `console.log(req)` (which will become relevant soon) and then we send our response (which we have set up to be either text or JSON).
+
+| Note about `dataType` and `arg` in `res.send(arg)` |
+| :--- |
+| The data type of what we send back in our response should match the `dataType` of the AJAX request. If we specify `dataType: 'json'` in the AJAX request but send back text (e.g., `'THIS IS A TEST RESPONSE AS PLAIN TEXT'`) as our response, then the returned promise from the AJAX request will be rejected. On the other hand, if we specify `dataType: 'text'` on the AJAX request but send back JSON (e.g., `{message: 'this is a test response as JSON'}`), then what we actually get back will be the object as text which is not what we want: `{"message":"this is a test response as JSON"}` instead of `{message: "this is a test response as JSON"}`. |
+
+The above note touches on making sure what is being sent and requested are as expected, but what we *really* do not want to happen is to leave off `app.use(express.json());` or `app.use(express.urlencoded({extended: false}));` in our `server.js` file. Why? Run the server and keep an eye on the console (not the browser console but in Node) for what shows up when you visit `http://localhost:3000/ajax.html`. With everything as it is currently, you should see something like the following towards the end of the logged request object:
+
+```javascript
+...
+body: [Object: null prototype] { name: 'Daniel' },
+...
+```
+
+What does this mean? It means the `data` sent through (i.e., POSTed) by the AJAX request is coming through as a value (notably as JSON) on the `body` property for the incoming `req`uest object. This is great! What good would form submissions and stuff of that nature be if you could not actually pull the data from the form submissions effectively? That is what `app.use(express.json());` and `app.use(express.urlencoded({extended: false}));` allow us to do. 
+
+Try repeating the above process but this time comment out `app.use(express.urlencoded({extended: false}));`. What do you see logged to the console for the `body` object? You probably see a line like the following:
+
+```javascript
+...
+  body: {},
+...
+```
+
+Now repeat the process yet again but this time *also* commenting out `app.use(express.json());`. What do you get for the `body` object? Nothing at all! That's not good. Now, you could probably try to parse things yourself and find the data you want somewhere in the `req` object, but why do this when all of it has been made easier for you? Express middleware to the rescue!
+
+One point of curiosity: Why did we get the data we wanted when we used `app.use(express.urlencoded({extended: false}));` but only got `{}` when it was commented out? This has to do with the headers. Visit the page again *without* commenting out `app.use(express.json());` or `app.use(express.urlencoded({extended: false}));` while also changing `console.log(req)` to just `console.log(req.headers)`. You should then see a line like the following: 
+
+```javascript
+'content-type': 'application/x-www-form-urlencoded; charset=UTF-8',
+```
+
+From above, we can see what the mime-type is: `application/x-www-form-urlencoded`. Now *that* is why we need the `app.use(express.urlencoded({extended: false}));` middleware. When a form comes through, unless specified otherwise, usually the default is going to be `application/x-www-form-urlencoded` for the `content-type`. That's typically how data is passed around by default. Oftentimes it will also be passed around as `application/json` or `text/json`. That's what `app.use(express.json());` is for. But we need `urlencoded` because if someone sends us data with the header shown above, then we need some middleware to parse it and the parsing result is made available to us in the `body` object. The data is stored on the `body` property of the `req` object likely because the middleware is based on `body-parser`.
+
+From everything we have seen so far, it is safe to say good practice is to basically always include the following on any Express application:
+
+- `app.use(express.static('public'));`
+- `app.use(express.json());`
+- `app.use(express.urlencoded({extended: false}));`
+
+It will cover most of your bases and save you from a bunch of headaches of why something doesn't work, why your data isn't coming through, etc.
+
+One last thing to note concerns the use of `helmet` middleware. It sets HTTP headers right upfront and protects you from a bunch of well-known vulnerabilitie. There's really no reason not to use this middleware. It's very simple: 
+
+```javascript
+npm i helment                       // install helmet in your package.json
+const helmet = require('helmet');   // import its contents (check npm for more options)
+app.use(helmet());                  // use it at the application level 
+```
+
+Remember: When using Express, make sure to use your `helmet`.
+
+---
+
+</details>
+
+<details><summary> <strong>Responding with JSON</strong></summary>
+
+In the previous note, in one of the examples, we *manually* tried to respond with JSON by including `res.send({message: 'this is a test response as JSON'})` within Express and having `dataType: 'json'` in our AJAX request. But we can do much better. Looking at [the docs](https://expressjs.com/en/4x/api.html#res.json) in the section about the `response` object, we see `res.json([body])`. This seems to be what we want.
+
+From the docs: `res.json([body])` sends a JSON response. This method sends a response (with the correct `content-type`) that is the parameter converted to a JSON string using [JSON.stringify](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/JSON/stringify). The parameter can be any JSON type, including object, array, string, Boolean, number, or null, and you can also use it to convert other values to JSON.
+
+With this new method, we can drop the `dataType` on the AJAX request completely and just use `res.json`:
+
+```javascript
+res.json('Some text');
+res.json({message: 'an object without setting dataType on AJAX request'});
+res.json(['Some text', {message: 'a message'}, [1,2,3], 4]);
+```
+
+As the docs note, any one of the above attempts to respond would result in the parameter (whether it be simple text, an object, an array of a bunch of other things, etc.) being converted to a JSON string using `JSON.stringify` before being sent over the server (remember everything sent over the server is done so as a string ... we simply want the string to be a JSON string which can be effectively parsed). 
+
+To recap: By default, `res.send` is going to set a mime-type of `content-type: text/html`. If, however, we use `res.json`, then the mime-type will be set as `content-type: application/json`. The takeaway is that `res.json` is incredibly important because anytime you need to respond with JSON, which will be very often depending on what you're building, then you're going to use `res.json` and not `res.send`. Any time you are going to respond with HTML, then you will probably use `res.render`, something we will get to shortly.
+
+---
+
+</details>
+
+<details><summary> <strong><code>res.json</code> and <code>res.render</code>: API or server-side rendering</strong></summary>
+
+Something to note which will become more and more evident as you build with Express: `res.render` and `res.json` loosely represent the two main things you would typically do with Express. To make the upcoming need/use of `res.render` evident, let's consider a scenario back in the day where say you wanted to visit MySpace before Facebook killed everything. 
+
+You would get on your computer and go to `www.myspace.com` and you'd connect with their servers. You'd send in a request and the server would need to kick back a response to your browser (which basically only understand HTML, CSS, and JavaScript). So the question becomes: What goes on inside of the server when your request is received? What happens inside? It may be helpful to consider what full stack development is really all about and to look at what makes up a server:
+
+<p align='center'>
+  <img width="175px" src='./images-for-notes/server-composition.png'>
+</p>
+
+You have a number of different layers in the stack. From bottom to top:
+
+- **OS (operating system):** The server is a computer and you have to have an operating system. You can't do anything without an operating system because you need some means of your software interacting with the hardware. Typically the OS will be [Linux](https://en.wikipedia.org/wiki/Linux), [Windows](https://en.wikipedia.org/wiki/Microsoft_Windows), [UNIX](https://en.wikipedia.org/wiki/Unix), etc.
+- **WS (web server):** [Apache](https://en.wikipedia.org/wiki/Apache_HTTP_Server), [Nginx](https://en.wikipedia.org/wiki/Nginx), [IIS](https://en.wikipedia.org/wiki/Internet_Information_Services), etc.
+- **DB (database layer):** You'd have a whole host of SQL and NoSQL options: [MySQL](https://en.wikipedia.org/wiki/MySQL), [PostgreSQL](https://en.wikipedia.org/wiki/PostgreSQL), [Oracle](https://en.wikipedia.org/wiki/Oracle_Database), [MongoDB](https://en.wikipedia.org/wiki/MongoDB), [Apache CouchDB](https://en.wikipedia.org/wiki/Apache_CouchDB), etc.
+- **PL (programming layer):** C, C++, Java, Python, Ruby, PHP, R, etc.
+- **Front-end UI (bonus):** Not really a part of the server stack but part of full stack development (the front-end layer). You have React, Vue, Angular, etc.
+
+The OS, WS, DB, and PL layers make up the server. When a user sends a request to port 80 (a port created by the transport layer), what happens? How does the server decide how to respond with HTML, CSS, and JavaScript? Since everyone on MySpace has their own page (just like Facebook), the question becomes: Does MySpace have individual HTML pages stored on the hard drive for every single user (millions of HTML pages, all very similar) that they serve up? Of course not. 
+
+What happens is that the user gets to port 80, and then the web server kicks into gear (say it's Apache). Suppose it's running PHP. It starts processing and interpreting PHP. It realizes it needs some stuff from the database (say from MySQL), go back to running some PHP, get some more stuff from the database (hopping back and forth, back and forth, ...). Eventually the back and forth process finishes, and Apache has finished all of its processing. It's read everything, and Apache sends it back out the door. At this point, then, PHP and MySQL have worked together to create HTML, CSS, and JavaScript. What it created was handed off to Apache/Nginx/IIS and *that* was sent back across the wire via HTTP. 
+
+That's how it happens. There's not an individual HTML file that is requested and then sent back. A whole bunch of stuff goes on inside of the server to ensure all of the proper information is being grabbed. A specific HTML file for you does not exist. What likely exists is some sort of template file. Every user page, no matter how complicated, appears basically the same. Maybe colors are different, the song was different, etc. But the structural integrity (think HTML) of each user page was the same. But all of the particulars about different parts of the structure depended on user-supplied information (stored in databases). 
+
+The key here is that the initial request goes out and grabs the HTML, CSS, and JavaScript once it's been made available. But the servers at MySpace are going to have to prepare a new response for every new request. Each new request is like starting over from scratch. So every time we go to our user page, the user page is built up and sent back. Built up and sent back. Every single time. This is called server-side rendering. Because the *server* is in charge of putting together the HTML, CSS, and JavaScript and sending it back to the browser. Wikipedia still does this. Each page you go to you're restarted the whole process from scratch. That is what we will be doing with `res.render`. So within Express, we will be able to create a template, however complicated. And the server is going to process our template into HTML, CSS, and JavaScript. And the template will ultimately be replaced by user-specific information retrieved in a variety of ways. That is server-side rendering. The server is in charge of everything on every page load always. 
+
+The other weapon is `res.json`. And what would happen in a more modern sense is you would go out to a place like Facebook and the first time you go out you have to get everything. You have to get all the necessary HTML, CSS, and JavaScript. Every following request, every time you click on something after that, because it is a single page application in the case of something like React, when you make a new request, instead of making a full-blown request, you are going to use AJAX and, instead of sending back HTML, CSS, and JavaScript, the server is just going to send back JSON. And that original HTML document which was loaded upon the first request, the JSON is going to go there and update the DOM. So it will *look* like a new page, but it's really just the same HTML, CSS, and JavaScript, but it's going to have some new data in it thanks to the JSON. Since we're using AJAX, we will still have a new request. We will still have a `req` and a `res`, it will still be our responsibility to handle that network traffic, but instead of responding with a template (with all the HTML, CSS, and JavaScript), we are *just* going to respond with JSON. 
+
+So the quick review: `res.render` is server-side rendering whereas `res.json` is going to mostly be for API/JSON needs. Server-side rendering is, "I am going to the server and every time the server is going to respond with *new, fresh* HTML, CSS, and JavaScript. Every single time. Always. Think Wikipedia. With `res.json`, or an API type situation, you as the user are going to go out, hit the server, and the server the first time is going to send you a whole bunch of HTML, CSS, and JavaScript. But every time after that, the server is just going to send JSON. And the page or the DOM will update itself accordingly to reflect the incoming data (i.e., JSON) after an AJAX request. Think Facebook or Amazon.
+
+In one case, you always have to come back to the server. The nice thing with `res.render` is you can make use of session variables, cookies, etc. The user always has to come to the server for everything because the server contains everything. The other architecture is very fast, it creates a great UI/UX opportunity, but you have to start storing stuff on the browser you would maybe not normally want to store there.
+
+---
+
+</details>
+
+<details><summary> <strong>Wiring up Express with a view engine</strong></summary>
+
+Let's wire up a basic Express server as we have done previously:
+
+```javascript
+const express = require('express');
+const app = express();
+
+const helmet = require('helmet');
+
+app.use(helmet());
+
+app.use(express.static('public'));
+app.use(express.json());
+app.use(express.urlencoded({extended: false}));
+
+app.get('/', (req, res, next) => {
+  // res.send('Sanity check')
+  // res.json({msg: 'Success!'}) // Send back some legitimate JSON
+  res.render('index') // We get an error without a view engine
+})
+
+app.listen(3000)
+```
+
+Right now, if we visit `http://localhost:3000/`, we'll get an error:
+
+```
+Error: No default engine was specified and no extension was provided.
+```
+
+The error message you might get sometimes can be rather scary, but often a good strategy is to look for whatever files *you* have created. If we do that, then we will see (in my case)
+
+```
+at /Users/danielfarlow/[...]/just-express/express201/rendering.js:14:7
+```
+
+This is telling us that there is an issue in the `rendering.js` file (which we have created) on line 14, character 7. In order to use `res.render`, the process goes something like this: 
+
+1. Express as we know it "happens" (i.e., our `rendering.js` file is nothing special except for trying to use `res.render` in one of its route handling response methods; otherwise it's business as usual). All the Node happens. We include express (i.e., `const express = require('express')`), we make our app (i.e., `const app = express()`), we do our middleware, we build our routes, etc. 
+2. We define a view engine. There are several options (these are just a few of the most popular ones):
+  - [EJS](https://ejs.co/) (Embedded JavaScript): From the home page: What is the "E" for? "Embedded?" Could be. How about "Effective," "Elegant," or just "Easy"? EJS is a simple templating language that lets you generate HTML markup with plain JavaScript. No religiousness about how to organize things. No reinvention of iteration and control-flow. It's just plain JavaScript. Install [via NPM](https://www.npmjs.com/package/ejs) with `npm install ejs`.
+  - [Mustache](http://mustache.github.io/): Logic-less templates for a variety of templates. If we were to use this, then we would be interested in [mustache.js](https://github.com/janl/mustache.js), a zero-dependency implementation of the mustache template system in JavaScript. Install [via NPM](https://www.npmjs.com/package/mustache) with `npm install mustache`. 
+  - [Jade/Pug](https://pugjs.org/api/getting-started.html): Pug is a high-performance template engine heavily influenced by Haml and implemented with JavaScript for Node.js and browsers. Previously named "Jade," it is now named "Pug" thanks to the fact that "Jade" was a registered trademark. Basically, Pug is a clean, whitespace sensitive syntax for writing HTML (see [the Pug GitHub page](https://github.com/pugjs/pug) or its [API reference](https://pugjs.org/api/reference.html) for more). Install [via NPM](https://www.npmjs.com/package/pug) with `npm install pug`.
+3. Inside one of our routes we have a `res.render`. 
+4. We pass that `res.render` two things:
+  1\. The file we want to use (e.g., an `.ejs` file, a `.mustache` file, a `.handlebars` or `.hbs` file, a `.pug` file, etc.).
+  2\. The data we want to send to that file.
+5. Express uses the node module for our specified view engine and parses the file accordingly. That means it takes the HTML, CSS, and JavaScript and combines it with whatever "node" there is in the file (i.e., the data available in `res.locals`).
+6. The final result of this process is a compiled product of the things the browser can read (i.e., HTML, CSS, and JavaScript).
+
+All the steps above constitute "the round trip" for a `res.render`. The templating engine serves as a bridge between Node and the front-end stuff. We can make a template out of HTML, CSS, and JS, and we can have a bridge that will allow us to access Node.js stuff. The specific bridge is the second argument to `res.render` (i.e., the data we want to send to our template file). That object, the data we want to send to our template file, is made available as `res.locals`. It will give us the ability to pass in a user's name, whether or not the user is validated, and generally any kind of data we might want to send over to the template. And then the template engine can fill out the HTML accodingly with the given data. So Express uses the node module for the view engine and will parse the template file out. It will combine all of the "node stuff" (i.e., the data we make available in `res.locals`) and combine it with HTML, CSS, and JavaScript to return a product of *only* HTML, CSS, and JavaScript that can be sent to the requesting client. 
+
+Before we can effectively use `res.render`, we need to use `app.set` to tell Express what will be used as the templating engine. Note that `app.set` is used for more than just this functionality though.
+
+| [The docs](https://expressjs.com/en/4x/api.html#app.set) on `app.set(name, value)` |
+| :--- |
+| `app.set(name, value)` assigns setting `name` to `value`. You may store any value that you want, but certain names (like `'view engine'` in our case) can be used to configure the behavior of the server. These special names are listed in the [app settings table](https://expressjs.com/en/4x/api.html#app.settings.table).<br><br> Calling `app.set('foo', true)` for a Boolean property is the same as calling `app.enable('foo')`. Similarly, calling `app.set('foo', false)` for a Boolean property is the same as calling `app.disable('foo')`. <br><br> Retrieve the value of a setting with `app.get()`: `app.set('title', 'My Site')` and then `app.get('title') // "My Site"`|
+
+Underneath the high-level description above in the docs, we see a section about "Application Settings" that provides a table of different properties (where each property corresponds to a `name`, the first argument to `app.set`), the type for that property, a description of the property, and what the default value is. In particular, we `view engine` is one such property, it's a string, a description (the default engine extension, file name extension that is, to use when omitted; note: sub-apps will inherit the value of this setting), and finally a default value of `undefined` (we will need to provide a value that reflects the template or view engine we want to use whether that's `ejs`, `hbs`, `pug`, etc.).
+
+With all of the above said, let's modify our server by running `npm install ejs` and then adding `app.set('view engine', 'ejs')` and see if we encounter any errors:
+
+```javascript
+const express = require('express');
+const app = express();
+
+const helmet = require('helmet');
+
+app.use(helmet());
+
+app.use(express.static('public'));
+app.use(express.json());
+app.use(express.urlencoded({extended: false}));
+
+app.set('view engine', 'ejs');
+
+app.get('/', (req, res, next) => {
+  res.render('index');
+})
+
+app.listen(3000)
+```
+
+If we go to `http://localhost:3000/`, then we do get an error, namely the following:
+
+```
+Error: Failed to lookup view "index" in views directory "/Users/danielfarlow/[...]/express201/views"
+```
+
+So what happened? We failed to lookup view `'index'`. Why `index`? Well, we told Express to go looking for a file `index` by using `res.render('index')`. What should the file extension of `index` be? It should be `.ejs` according to `app.set('view engine', 'ejs')`. Well, we don't have an `index.ejs` file. Furthermore, Express went looking for the `index.ejs` in the `views` folder. But we don't currently have a `views` folder. Why did Express go looking for this file in the `views` folder?
+
+The answer, as usual, is in the documentation. In the "Application Settings" table under [the docs entry](https://expressjs.com/en/4x/api.html#app.set) for `app.set` we see a `name` of `views` that is expected to be a string or array, with a description (a directory or an array of directories for the application's views. If an array, the views are looked up in the order they occur in the array), and finally a default value of `process.cwd() + '/views'` (i.e., the current working directory or `cwd` with `/views` appended to it; basically, it's just looking for the `views` folder in your project director). We're going to be more explicit than `process.cwd() + '/views'` by using the `path` module and using `path.join(__dirname + '/views')`. What's the difference?
+
+| Note: `process.cwd()` vs `__dirname` in Node.js |
+| :--- |
+| Some helpful comments can be found on [a Stack Overflow post](https://stackoverflow.com/q/9874382/5209533). Basically, the `cwd` in `process.cwd()` is a method of the global object `process` where the return value is a string representing the current working directory of the Node.js process (i.e., where you are currently running Node or simply the directory from which you invoked the `node` command). On the other hand, `__dirname` is the string value of the directory name for the directory containing the current script. The big difference is that `__dirname` is not actually a global but rather local to each module. You can always execute `process.cwd()` to find out where the Node.js `process` originated or is running (you can actually change this with `process.chdir` but we do not need to worry about that right now).<br><br> In a nutshell, knowing the scope of each makes things easier to remember. `process` is `node`'s global object, where `.cwd()` returns where Node is running. `__dirname` is `module`'s property, where the value represents the file path of the module. Similarly, `__filename` is another `module`'s property which holds the file name of the module. |
+
+All that said, `require` the native `path` module at the top of your server like so: `const path = require('path');`. Then, underneath  `app.set('view engine', 'ejs');` we can add `app.set('views', path.join(__dirname + '/views'));`. Then create a `views` folder and place an `index.ejs` file inside of the `views` folder with just an `<h1>Rendered file!</h1>` for right now. So here are the three pieces to `res.render` for a specific file:
+
+1. **The file name:** For example: `index` in `res.render('index');`
+2. **The type or extension of the file:** For example: `app.set('view engine', 'ejs');`. This tells us we will be looking for `index.ejs`.
+3. **The location of the file:** For example: `app.set('views', path.join(__dirname + '/views'));` tells us the file will be in the `views` directory which should be at the same level at whatever script we are writing our code in (see note above). If we have more than one folder for the views, then the docs note we can include something like `app.set('views', [folder1, folder2, ...]);` where each folder will be searched for the file until the first one is found. It should be noted here that Express will *not* search subdirectories you create within the `views` directory if you plan on creating subdirectories. 
+
+---
+
+</details>
+
+<details><summary> <strong>Using more than one view engine in Express</strong></summary>
+
+In the note above, we learned the basics of wiring up Express with a view engine. It's entirely plausible (albeit somewhat unlikely) that you would want to use *more than one* view engine. Maybe you liks EJS for certain things and Pug more for others. Whatever the case, you can use as many view engines as you like. The only catch is you will have to be explicit for what files you want to render.
+
+Recall from [the docs](https://expressjs.com/en/4x/api.html#app.set) concerning `app.set(name,value)`, the `'view engine'` `name` takes one `value`, the extension to be used for a file name when the file name extension is omitted. Hence, if we declare
+
+```javascript
+app.set('view engine', 'ejs');
+```
+
+and later invoke `res.render('index');`, then we have basically told Express to assume there's an `.ejs` extension on the end of the `index` file name given to `res.render`. If we did not use `app.set('view engine', 'file-extension')`, then Express would not know what to do with `res.render(index)`. Instead, we would have to *explicitly* (i.e., manually) include the filename extension like so: `res.render(index.ejs)`. The upshot of all this is basically we should use `app.set('view engine', 'file-extension')` to tell Express the *default* template engine we want to use when filenames are provided to `res.render` when the file extension for the file name is omitted. If you want to use a view engine other than the default one set by `app.set('view engine', 'file-extension')`, then you must explicitly provide the file extension for whatever file name you pass into `res.render`. 
+
+Here's the process in more detail with a working server example below it:
+
+1. NPM install the engines you need:
+
+```bash
+npm install ejs
+npm install pug
+npm install hbs
+```
+
+2. Set the engine you want to be your default view engine:
+
+```javascript
+/* Setting the default view engine
+  - Uncomment whichever line you want to set your default view engine
+  - Whichever one you uncomment means you do not need to provide 
+    the file extension for that file when the file name is passed to
+    res.render. For example, if you uncommented the line setting ejs
+    to the default view engine, then you could use res.render(index)
+    and Express would automatically look for index.ejs
+  - If you do not uncomment one of the lines below, then you will always
+    have to manually specify the file extension for the file name passed
+    to res.render
+  - If you set ejs as the default view engine, then whenver you want to
+    use hbs, pug, or something else, then you will need to explicitly
+    provide the file extension for the file name passed to res.render.
+  - In summary, if we set ejs to be the default view engine, then we 
+    could use ejs, hbs, and pug in our application like so:
+    * res.render(index);        // assumes the file is index.ejs
+    * res.render(index.hbs);    // explicitly tell Express to use Handblebars
+    * res.render(index.pug);    // explicitly tell Express to use Pug
+*/
+// app.set('view engine', 'ejs');    // EJS
+// app.set('view engine', 'hbs');    // Handlebars
+// app.set('view engine', 'pug');    // Pug
+```
+
+3. Render your template (be sure to set the file extension when rendering a template without the default extension):
+
+```javascript
+res.render(index);        // assumes default use of .ejs extension per above
+res.render(index.hbs);    // specify use of handlebars as hbs is not the default
+res.render(index.pug);    // specify use of pug as pug is not the default
+```
+
+Finally, here's an example tying all of this together (see below the code snippet for directory structure and file contents):
+
+```javascript
+// server.js
+const path = require('path');
+
+const express = require('express');
+const app = express();
+
+const helmet = require('helmet');
+
+app.use(helmet());
+
+app.use(express.static('public'));
+app.use(express.json());
+app.use(express.urlencoded({extended: false}));
+
+// Set the default view engine
+app.set('view engine', 'ejs');   // uncomment to make default
+// app.set('view engine', 'hbs');   // uncomment to make default
+// app.set('view engine', 'pug');   // uncomment to make default
+
+// Specify folders for Express to look in for views files
+app.set('views', [
+  path.join(__dirname + '/views'), 
+  path.join(__dirname + '/views/ejsViews'),
+  path.join(__dirname + '/views/handlebarsViews'),
+  path.join(__dirname + '/views/pugViews'),
+  path.join(__dirname + '/viewsFakeOne'),
+]);
+
+// For base visit to the root
+app.get('/', (req, res, next) => {
+  res.render('index');
+})
+
+// For files directly in the views folder (which will be typical)
+app.get('/sampleejs', (req, res, next) => {
+  res.render('sample', {name: 'EJS'});
+})
+
+app.get('/samplehandlebars', (req, res, next) => {
+  res.render('sample.hbs', {name: 'HANDLEBARS'});
+})
+
+app.get('/samplepug', (req, res, next) => {
+  res.render('sample.pug', {name: 'PUG'});
+})
+
+// For files in subdirectories of the views folder (somewhat common)
+app.get('/subfolderejs', (req, res, next) => {
+  res.render('subEjsView', {name: 'EJS in a subfolder'});
+})
+
+app.get('/subfolderhandlebars', (req, res, next) => {
+  res.render('subHandlebarsView.hbs', {name: 'HANDLEBARS in a subfolder'});
+})
+
+app.get('/subfolderpug', (req, res, next) => {
+  res.render('subPugView.pug', {name: 'PUG in a subfolder'});
+})
+
+// For a file in a viewsFakeOne folder not within views folder
+app.get('/fakeview', (req, res, next) => {
+  res.render('fakeview', {name: 'EJS in a viewsFakeOne directory'});
+})
+
+app.listen(3000)
+```
+
+Directory structure needed for this code:
+
+```
+express201
+ ┣ node_modules
+ ┣ views
+ ┃ ┣ ejsViews
+ ┃ ┃ ┗ subEjsView.ejs
+ ┃ ┣ handlebarsViews
+ ┃ ┃ ┗ subHandlebarsView.hbs
+ ┃ ┣ pugViews
+ ┃ ┃ ┗ subPugView.pug
+ ┃ ┣ index.ejs
+ ┃ ┣ sample.ejs
+ ┃ ┣ sample.hbs
+ ┃ ┗ sample.pug
+ ┣ viewsFakeOne
+ ┃ ┗ fakeview.ejs
+ ┣ package-lock.json
+ ┣ package.json
+ ┗ server.js
+```
+
+File contents:
+
+```javascript
+// subEjsView.ejs
+<h1>A template file rendered using <%= name %>!</h1>
+
+// subHandlebarsView.hbs
+<h1>A template file rendered using {{name}}!</h1>
+
+// subPugView.pug
+h1 A template file rendered using #{name}!
+
+// index.ejs
+<h1>Rendered template page!</h1>
+
+// sample.ejs
+<h1>A template file rendered using <%= name %>!</h1>
+
+// sample.hbs
+<h1>A template file rendered using {{name}}!</h1>
+
+// sample.pug
+h1 A template file rendered using #{name}!
+
+// fakeview.ejs
+<h1>A template file rendered using <%= name %>!</h1>
+
+// server.js (the code snippet previously)
+```
+
+---
+
+</details>
+
+<details><summary> <strong>Example of putting an entire frontend site in Express</strong></summary>
+
+As mentioned previously, we can host entire frontend sites using Express by just dumping everything in a `public` folder and statically serving it. Execute the following commands in the terminal (e.g., bash):
+
+``` BASH
+# Navigate to desktop or wherever you want the project to be created
+cd ~/Desktop
+# Clone the repository at https://github.com/rbunch-dc/jquery-todo
+git clone https://github.com/rbunch-dc/jquery-todo.git
+cd jquery-todo
+# Get rid of the git repository--we don't need it for this example
+rm -rf .git
+mkdir public
+touch server.js
+# Initialize a project using npm
+npm init -y
+npm i express helmet
+npm i nodemon -g # if you haven't already
+nodemon server.js
+```
+
+Now, move all of the files in the directory except `server.js` into the `public` folder (using VSCode or whatever editor you are using) and paste the following code into the empty `server.js` folder and save the file:
+
+```javascript
+// server.js
+const express = require('express');
+const app = express();
+
+const helmet = require('helmet');
+
+app.use(helmet());
+
+app.use(express.static('public'));
+app.use(express.json());
+app.use(express.urlencoded({extended: false}));
+
+app.get('/', (req, res, next) => {
+  res.send('index.html')
+})
+
+app.listen(3000);
+```
+
+Now navigate to `http://localhost:3000/` and behold!
+
+---
+
+</details>
+
+
 
 
 
 ## Course Questions to Follow Up On
 
 - TBD
+

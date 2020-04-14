@@ -1,16 +1,26 @@
+<h1>AJAX test page has been loaded!</h1>
+
 <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.3.1/jquery.min.js"></script>
 
 <script>
-    const ourRequest = $.ajax({
-        method: "POST",
-        url: "http://localhost:3000/ajax",
-        dataType: "json",
-        data: {
-            name: "Rob"
-        }
-    })
-    ourRequest.then((response, statusCode, xmlhtpo) => {
-        console.log(response);
-        console.log(xmlhtpo);
-    })
+
+  function makeOurRequest() {
+    return $.ajax({
+      method: "POST",
+      url: "http://localhost:3000/ajax",
+      // dataType: "text",
+      // dataType: "json",
+      data: {
+        name: "Daniel"
+      }
+    });
+  }
+
+  const theRequest = makeOurRequest();
+
+  theRequest
+    .then(response => console.log(`AJAX request successful! Response: `, JSON.parse(JSON.stringify(response))))
+    .catch(err => console.log(`AJAX request failed! Error: `, err))
+
+
 </script>
