@@ -2013,9 +2013,346 @@ Since most of the previous notes relate to using EJS, the examples with Handleba
 
 ## Express 301 (req and res revisited, the router, and the express generator)
 
-<details open><summary> <strong>Forms and cookies: getting data from the <code>request</code> object</strong></summary>
+<details><summary> <strong>Adding styles to template files (properly setting<code>href</code>)</strong></summary>
 
-tbd
+Suppose your directory structure looks something like the following:
+
+```
+project
+ ┣ node_modules
+ ┣ public
+ ┃ ┗ stylesheets
+ ┃ ┃ ┗ styles.css
+ ┣ views
+ ┃ ┣ login.ejs
+ ┃ ┗ welcome.ejs
+ ┣ package-lock.json
+ ┗ package.json
+```
+
+Within `login.ejs` we want to use some styles from our `stylesheets` directory. Why might it make sense to have `link` tag as such:
+
+``` HTML
+<link rel="stylesheet" type="text/css" href="/stylesheets/styles.css">
+```
+
+The answer is that since the styles are statically being served from the `public` directory and we have used `app.use(express.static('public'))`, Express will look through the `public` directory for a folder `stylesheets` and a file `styles.css` within that folder. Express knows to do this because when it looks through the `public` folder the path is simply
+
+```
+/Users/danielfarlow/Desktop/[...]/project/public
+```
+
+Hence, if we set the `href` to `href="/stylesheets/styles.css"`, this is equivalent to
+
+```
+/Users/danielfarlow/Desktop/[...]/project/public/stylesheets/styles.css
+```
+
+The same principle can be applied to scripts or whatever else you may have in your `public` folder or wherever it is you are statically serving files from.
+
+---
+
+</details>
+
+<details><summary> <strong>Forms: getting data from the <code>request</code> object</strong></summary>
+
+Consider the following basic `login.ejs` file with a basic form:
+
+```javascript
+<link rel="stylesheet" type="text/css" href="/stylesheets/styles.css">
+<div class="login-page">
+  <div class="form">
+    <form action="/process_login" method="post" class="login-form">
+      <input type="text" placeholder="username" name="username" />
+      <input type="password" placeholder="password" name="password"/>
+      <button>login</button>
+      <p class="message">Not registered? <a href="#">Create an account</a></p>
+    </form>
+  </div>
+</div>
+```
+
+The `action` attribute on a `form` tag determines where the form is going to be submitted when it is submitted. On a front-end framework, you would never submit the form because you don't want to leave the HTML page. But in our case, because we're using `res.render`, Express is in charge of rendering every single page. So we are going to have Express move the form once it is submitted to on to the `/process_login` route, and it will be a `post` request (the `method` attribute on the form indicates what kind of request is going to be fired off once the form is submitted). This should immediately remind us that we need some middleware in Express to handle what happens when we get a request, specifically a `post` request, to the `/process_login` route. For right now let's just do a simple test:
+
+```javascript
+app.post('/process_login', (req, res, next) => {
+  console.log(req.body); // see what data is coming across the wire from the form
+  res.json({
+    message: 'You tried to login!'
+  })
+})
+```
+
+The data, as it is being passed from the `form`, is coming from two `input` boxes. We have `text` and `password` being submitted by the user. In HTML, whatever the `name` attribute is set as is what is going to be passed as to whomever comes next. In our case, our `/process_login` route is going to get the submitted data through `body` on the `request` object (thanks to `app.use(urlencoded{extended: false})`) and the property names will correspond to whatever `name`s were set on the `input` tags with the property values being whatever the user entered. 
+
+For example, suppose our `form` had the following `input` tags:
+
+``` HTML
+<input type="text" placeholder="username" name="some" />
+<input type="text" placeholder="user" name="thing" />
+<input type="password" placeholder="password" name="else"/>
+```
+
+And suppose the user typed in values of `An`, `illustrative`, `example` into the different `input` fields, respectively. Once the `form` was submitted, we we would see something like the following come across the wire:
+
+```
+[Object: null prototype] {
+  some: 'An',
+  thing: 'illustrative ',
+  else: 'example'
+}
+```
+
+Whatever the user submitted will come through the HTTP message and the form will come through as `urlencoded` (hence the need of the Express middleware to parse the HTTP message corresponding to the user-submitted request and to tack on the data to the `req.body` object). Note that before the `urlencoded` request gets to `app.post('/process_login', ...)` it is subjected to all of the middleware used at the application level, namely `app.use(express.urlencode{extended: false})`. This middleware parses the `request` object coming from the user and will add to the `request` object a `body` property which will have the user-submitted data from the form on it.
+
+What we actually want to accomplish here is we want to decide what to do with the user. Think about what happens when you log in to a site. Are you redirected to a certain page only for logged in users? Are you redirected to your dashboard? Somewhere else? The point is we can have a bunch of logic in our routes to handle the user effectively. And almost always your logic will *depend* on properties on the `request` object. In the case of form-submitted data, we have access to information on the `body` of the `request` which should further inform what we want to do with the user. It's fairly common to destructure information off the `body` of the `request` like so (as an example of our login form):
+
+```javascript
+const { username, password } = req.body;
+```
+
+Then you can do stuff like check the database to see if a user's credentials are valid (maybe you're using `bcrypt` or some version of `blowfish` or some sort of algorith or OAuth). As an example, suppose we want to direct the user to the welcome page if they are valid. And we might want to save their username in a cookie--or you could use sessions (we want to do this to make it readily available). Sessions and cookies are very similar. The difference is that cookie data is stored entirely on the browser and the browser will send it up to the server every time a request is made. Session data, on the other hand, is stored on the server and the browser is essentially given a key for that data. But sessions are not included with Express (you can fetch [express-session](https://www.npmjs.com/package/express-session) if you want to use that instead of cookies). But the ability to do things with cookies is built-in with Express so we'll just use that instead in this case. You could use local data too, but we're just going to stick with cookies for this. 
+
+---
+
+</details>
+
+<details><summary> <strong>Cookies: using <code>res.cookie</code>, <code>res.clearCookie</code>, and other cookie-related information</strong></summary>
+
+As always, it is best to look at [the docs](https://expressjs.com/en/4x/api.html#res.cookie). We see the following for `res.cookie(name, value [, options])`: Sets cookie `name` to `value`. The `value` parameter may be a string or object converted to JSON. The `options` parameter is an object that can have the following properties.
+
+| Property | Type | Description |
+| :-- | :-: | :--| 
+| `domain` | String | Domain name for the cookie. Defaults to the domain name of the app. |
+| `encode` | Function | 	A synchronous function used for cookie value encoding. Defaults to `encodeURIComponent`. |
+| `expires` | Date | Expiry date of the cookie in GMT. If not specified or set to 0, creates a session cookie. |
+| `httpOnly` | Boolean | Flags the cookie to be accessible only by the web server. |
+| `maxAge` | Number | Convenient option for setting the expiry time relative to the current time in milliseconds. |
+| `path` | String | Path for the cookie. Defaults to `"/"`. |
+| `secure` | Boolean | Marks the cookie to be used with HTTPS only. |
+| `signed` | Boolean | Indicates if the cookie should be signed. |
+| `sameSite` | Boolean or String | Value of the "SameSite" `Set-Cookie` attribute. More information [here](https://tools.ietf.org/html/draft-ietf-httpbis-cookie-same-site-00#section-4.1.1) |
+
+**Note:** All `res.cookie()` does is set the HTTP `Set-Cookie` header with the options provided. Any option not specified defaults to the value stated in [RFC 6265](https://tools.ietf.org/html/rfc6265).
+
+See [the docs](https://expressjs.com/en/4x/api.html#res.cookie) for example usage (and also note you can set multiple cookies in a single response by calling `res.cookie` multiple times).
+
+For our uses right now, we'll just note that `res.cookie` takes *at least* 2 arguments:
+
+1. The `name` of the cookie.
+2. The `value` to set it to.
+
+So every time whoever the response is sent to makes a request, they're going to send their cookie up so the server will have all of that data available to it. So the example of using the form to submit a username and password and subsequently getting the values off `req.body`
+
+```javascript
+const { username, password } = req.body;
+```
+
+can now be used inside of our route in a conditional way to set a cookie:
+
+```javascript
+app.post('/process_login', (req, res, next) => {
+  const { username, password } = req.body;
+  if (password = 'x') {
+    res.cookie('username', username);
+    res.redirect('/welcome');
+  }
+  res.json(req.body)
+})
+```
+
+So once the form is submitted, the application-level middleware `app.use(express.urlencoded({extended: false}))` parses the HTTP message and tacks the data onto a `body` object which is appended to the `request` object before our route middleware `app.post('/process_login', ...)` deals with the `request`. If the password supplied has a value of `'x'`, then we will stash the `username` in a cookie so that going forward we can access that username value on any page and we don't need to remember it. Why does this matter? Well, if the user comes back or goes to a new path, then we will not have access to `req.body` anymore. We get a totally new response and a totally new request. Remember that's part of HTTP. It's stateless. There's no dialogue going on. It's just the one-off process. You get one request and you get one response. And then we start completely over. So that is what the cookie is for. Once we've stashed the `username` in the cookie, we can call `res.redirect` to send the user where we want them to go.
+
+From [the docs](https://expressjs.com/en/4x/api.html#res.redirect) for `res.redirect([status,] path)`: Redirects to the URL derived from the specified `path`, with specified `status`, a positive integer that corresponds to an [HTTP status code](https://www.w3.org/Protocols/rfc2616/rfc2616-sec10.html) . If not specified, `status` defaults to “302 “Found”. (See the docs for more detail and examples.)
+
+The essential fact is that `res.redirect` takes one argument (unless we give it the optional first one as a status code as specified above): where to send the browser. We shall, for the time being, simply have `res.redirect('/welcome')`. So to recap:
+
+```javascript
+app.post('/process_login', (req, res, next) => {
+  const { username, password } = req.body;
+  if (password === 'x') {
+    res.cookie('username', username);
+    res.redirect('/welcome');
+  }
+  // res.json(req.body) // <-- Error [ERR_HTTP_HEADERS_SENT]: Cannot set headers after they are sent to the client 
+})
+```
+
+When the user submits the form, if their password is `x`, then we will store their username in a cookie with `name` of `username` with value of `username`. We will then redirect the user to the `/welcome` route. We can add some more conditional logic to ensure they are redirected somewhere else (programmatically instead of manually trying to move around using the URL) if their password is not `x`:
+
+```javascript
+app.post('/process_login', (req, res, next) => {
+  const { username, password } = req.body;
+  if (password === 'x') {
+    res.cookie('username', username);
+    res.cookie('somethingelse', 88);
+    res.redirect('/welcome');
+  } else {
+    res.redirect('/login?msg=fail');
+  }
+})
+```
+
+So if the user did not submit the form with a password of `x` then we will send them right back to the `/login` page but we're going to put in a little query string `?msg=fail` as well (which we will get to momentarily). 
+
+To review at a higher level: The `/process_login` is a `post` route and note that the user will *never* see this page. The browser will never see this page. The user will come here (i.e., to this route) as soon as they submit the form, but there is no `res.render`, `res.send`, or `res.json`. There are only `res.direct` constructs. This means the user will hit this route after submitting the form just long enough to check if the password is `x` or not and then we'll redirect them to either `/welcome` or back to `/login` (with the query string `?msg=fail`). Both redirects will result in `GET` requests to either `/welcome` or `/login`.
+
+| Note about `res.redirect` and the optional first argument of an HTTP `status` code |
+| :--- |
+| See the section note following this one for more information about `res.redirect` and how to specify what HTTP method you want to be used for your redirect.<br><br>Super short version: `302` (the default value) or setting `303` manually will result in a `GET` request to the specified route while setting `307` will result in the HTTP method being handled on the current route being used for the route you are redirecting to (i.e., setting `307` will result in `POST -> POST`, `PUT -> PUT`, `GET -> GET`, etc.).<br><br>Longer version: your redirect will either be a `GET` request (due to using the default value of `302` for the optional first argument to `res.redirect` as an HTTP status code or manually specifying `303`) **OR** the same kind of request for whatever request you are currently handling by specifying `307` for the optional `status` value (i.e., using `res.redirect(307, '/something')` from within a HTTP `METHOD` request to a certain route (e.g., `PUT`, `POST`, etc.) will result in another HTTP request of the same `METHOD` to another specified route).<br><br>As a simple example, if we are handling `app.METHOD('/login', ...)` and somewhere in `...` we want to redirect the user to `/welcome` using `res.redirect(status, '\welcome')`, then we can not set `status` at all (in which case `302` will be used by default and a subsequent `GET` request will be issued to the `/welcome` route), we can set `status` to `303` which will more explicitly ensure we issue a `GET` request to `'/welcome'`, or finally we can set `status` to `307` which will explicitly ensure we issue a `METHOD` request to `'/welcome'` (i.e., the same kind of request we were presently handling). Of course, other `status` values can be used, but these will typically be the ones you want to use. Check out the [HTTP Status Code](https://httpstatuses.com/) site for more info and first note that `3xx` relates to redirections. |
+
+The point of all of the above is to note that there's no real "option" for the user in the `/process_login` route we've created above. This post route's *only* purpose is for the user to submit data and then for us to decide what to do with the user (i.e., a redirection of some sort or something else) based on that data. Remember that's what a post route is for: It means we want to submit some data (i.e., we want to accept some data from the user and then send them on to where they belong).
+
+Let's revisit the code we currently have:
+
+```javascript
+app.post('/process_login', (req, res, next) => {
+  const { username, password } = req.body;
+  if (password === 'x') {
+    res.cookie('username', username);
+    res.cookie('somethingelse', 88);
+    res.redirect('/welcome');
+  } else {
+    res.redirect('/login?msg=fail');
+  }
+})
+```
+
+If the user has password `x` and is redirected to `/welcome` using a `GET` request, then we need to set up some middleware to handle the `GET` request at the `/welcome` route. Here's the `welcome.ejs` view:
+
+``` HTML
+<link rel="stylesheet" type="text/css" href="/stylesheets/styles.css">
+<div class="login-page">
+  <div class="form">
+    <h1>Welcome back to the site, <%= username %>!</h1>
+    <p><a href="/logout">Log out</a></p>
+  </div>
+</div>
+```
+
+If we want to put the actual `username` of the user in the DOM, then we need to be able to access it. Well where is the `username` for us to access it? We stored it in a cookie when handling the `POST` request to the `process_login` route (note that the `username` is made available to us upon submission of the form via `req.body`): 
+
+```javascript
+app.post('/process_login', (req, res, next) => {
+  const { username, password } = req.body;
+  if (password === 'x') {
+    res.cookie('username', username);
+    res.cookie('somethingelse', 88);
+    res.redirect(307, '/welcome');
+  } else {
+    res.redirect('/login?msg=fail');
+  }
+})
+```
+
+This presents an interesting issue for us when setting up the middleware for `GET` requests to `/welcome`:
+
+```javascript
+app.get('/welcome', (req, res, next) => {
+  res.render('welcome', {
+    username: req.body.username
+  });
+})
+```
+
+The above route handler will fail as it is currently written. Why? Well, there's not actually any `username` on `req.body` at this point. Why? Because a new `GET` request was made to `/welcome` where the `username` is no longer available! That is, `username` is not being sent through the `body` of the `request` object anymore--that happened on the first request. As just noted, the `GET` request to `/welcome` coming from the redirect is a totally new request now. There is no `username` to access! This is why we stored the `username` in a cookie when `username` actually was available to us on the request body: 
+
+```javascript
+const { username, password } = req.body;
+...
+res.cookie('username', username);
+```
+
+So now instead of sending `req.body.username`, which is empty, we will instead send `req.cookies.username`:
+
+```javascript
+app.get('/welcome', (req, res, next) => {
+  res.render('welcome', {
+    username: req.cookies.username
+  });
+})
+```
+
+So the `req.cookies` object will have a property for every named cookie that has been set. The reason we have a `req.cookies.username` to access is because of setting it previously with `res.cookie('username', username);`. Note that you set cookies in a singular fashion (i.e., `res.cookie(name, value)`) while they are available in a plural fashion as key-value pairs on the `req.cookies` object. 
+
+Before we actually start using information from the cookies we set, we will need a third-party module to parse the `Cookie` header from the HTTP message (much the same as we needed `app.use(express.json())` and `app.use(urlencoded.json())` to help parse the body of a request after a form submission so we could easily grab the user-submitted data ... we cannot use this middleware here because the cookies are coming across in the `Cookie` header of the HTTP message and not the body). We will use the [cookie-parser](https://www.npmjs.com/package/cookie-parser) package which states the following at the top of its documentation:
+
+Parse `Cookie` header and populate `req.cookies` with an object keyed by the cookie names. Optionally you may enable signed cookie support by passing a `secret` string, which assigns `req.secret` so it may be used by other middleware.
+
+Now from our `welcome.ejs` view we will include the ability for the user to logout if they so desire:
+
+``` HTML
+<p><a href="/logout">Log out</a></p>
+```
+
+Now we need to make a route for `/logout`, specifically one that accounts for a `GET` request because an anchor tag *always* points to a `GET` route. When the user logs out, we will want to clear their `username` cookie using `res.clearCookie(name [, options])`.
+
+| Note from [the docs](https://expressjs.com/en/4x/api.html#res.clearCookie) on `res.clearCookie(name [, options])` |
+| :--- |
+| Clears the cookie specified by `name`. For details about the `options` object, see [res.cookie()](https://expressjs.com/en/4x/api.html#res.cookie).<br><br>Web browsers and other compliant clients will only clear the cookie if the given `options` is identical to those given to [res.cookie()](https://expressjs.com/en/4x/api.html#res.cookie), excluding `expires` and `maxAge`.<br><br>**Example:** `res.cookie('name', 'tobi', { path: '/admin' })` and `res.clearCookie('name', { path: '/admin' })`. |
+
+In our case, we will simply want to clear the `username` cookie like so:
+
+```javascript
+res.clearCookie('username')
+```
+
+Note that you can only clear cookies individuall by name. If you wanted to clear all cookies in one go, you could do something like the following:
+
+```javascript
+for (let property in req.cookies) {
+  res.clearCookie(property)
+}
+```
+
+Further still, if you only wanted to clear certain kinds of cookies that you had set, then you could add some conditional logic to specify that as well. Whatever you do, note that the cookies will still be available on the Express server but removed from the client (i.e., the user's computer or web browser). They will just no longer be available on the web browser. To see the difference, do something like the following:
+
+```javascript
+app.get('/logout', (req, res, next) => {
+  console.log('Cookies on server before clearing: ', req.cookies);
+  res.clearCookie('username')
+  console.log('Cookies on server after clearing: ', req.cookies);
+  res.redirect(303, '/login');
+})
+```
+
+Now go to the `/login` route and enter username `Bill` and password `x`. Before logging out, in your *web browser console* (i.e., Chrome, Safari, etc., and not Node.js) type `document.cookie` and press enter. You will see `"username=Bill"`. Now click the log out button. 
+
+In your Node.js console you will see something like the following get logged:
+
+```
+Look at the cookies at the beginning:  { username: 'Bill' }
+Look at the cookies at the end:  { username: 'Bill' }
+```
+
+If you hope back over to the browser console and type `document.cookie` and press enter then you will see `""`.
+
+It is good practice to clear unnecessary cookies. It is good to get it out of their system so you are not clogging it up and so that sensitive data is not available later on. The user can refresh and refresh their page and whatever cookies are associated with them are going nowhere.
+
+---
+
+</details>
+
+<details><summary> <strong>Some notes about <code>res.redirect([status,] path)</code> and the optional <code>status</code> value</strong></summary>
+
+First, take a look at [the Express docs](https://expressjs.com/en/4x/api.html#res.redirect) for `res.redirect`. Second, realize that [HTTP status codes](https://httpstatuses.com/) are actually quite important. Third, note that we should really probably *always* specify the `status` value to most likely be `303` (when we want our redirect to issue a `GET` request) or `307` (when we want our redirect to use the same method request as was being handled before the redirect). Of course, other  status values can be used, but `303` and `307` will be the most common.
+
+Take a look at [this *awesome* answer](https://stackoverflow.com/a/48979655/5209533) on Stack Overflow. Some of the highlights:
+
+- The `303 "See Other"` redirect should always be followed by a `GET` (or `HEAD`) request (according to the HTTP/1.1 spec), not `PUT` or anything else. See [RFC 7231, Section 6.4.4](https://tools.ietf.org/html/rfc7231#section-6.4):
+- The other popular types of redirects - `301 "Moved Permanently"` and `302 "Found"` in practice usually work contrary to the spec as if they were `303 "See Other"` and so a `GET` request is made. From [this answer](https://stackoverflow.com/a/33215393/5209533) (noting how `302` statuses were originally implemented incorrectly by browsers so codes `303` and `307` largely exist for this reason): For historical reasons, a user agent MAY change the request method from POST to GET for the subsequent request. If this behavior is undesired, the 307 (Temporary Redirect) status code can be used instead.
+- Excerpt [from Wikipedia](https://en.wikipedia.org/wiki/List_of_HTTP_status_codes): This [i.e., what's touched on in the point above] is an example of **industry practice contradicting the standard**. The HTTP/1.0 specification (RFC 1945) required the client to perform a temporary redirect (the original describing phrase was "Moved Temporarily"), but popular browsers implemented 302 with the functionality of a 303 See Other. Therefore, HTTP/1.1 added status codes 303 and 307 to distinguish between the two behaviours. However, some Web applications and frameworks use the 302 status code as if it were the 303.
+- There is a `307 Temporary Redirect` (since HTTP/1.1) but it explicitly disallows changing of the HTTP method, so you can only redirect a `POST` to `POST`, a `PUT` to `PUT`, etc., which can sometimes be useful.
+
+Long story short: It's a good idea to explicitly pass the `status` value to `res.redirect` even though it is optional, and you should pass `303` if you want your redirect to issue a `GET` request or `307` if you want your redirect to issue the same kind of request currently being handled up to the redirect.
+
+---
+
+</details>
+
+<details open><summary> <strong>Getting data from the query string: <code>req.query</code></strong></summary>
+
+TBD
 
 ---
 
