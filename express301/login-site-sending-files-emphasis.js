@@ -111,6 +111,13 @@ app.get('/story/:generalStoryId/:link', (req, res, next) => {
   res.send(`<h1>This is the link: ${link}. You are now reading more about story ${generalStoryId}.</h1>`)
 })
 
+app.get('/statement', (req, res, next) => {
+  // This will render the statement IN the browser which we do not want
+  // res.sendFile(path.join(__dirname, 'userStatements/BankStatementAndChecking.png'))
+  const {username} = req.cookies;
+  res.download(path.join(__dirname, 'userStatements/BankStatementAndChecking.png'), `${username}sStatement.png`)
+})
+
 app.get('/logout', (req, res, next) => {
   // clear all cookies:
   // for (let property in req.cookies) {

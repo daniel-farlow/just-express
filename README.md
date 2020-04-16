@@ -2778,13 +2778,717 @@ and another view could look drastically different.
 
 </details>
 
-<details open><summary> <strong>Sending files and dealing with "headers already sent" error</strong></summary>
+<details><summary> <strong>Sending files and dealing with "headers already sent" error</strong></summary>
 
+We are now going to look at how to send files and what to do if the headers have already been sent (at least a use case for how to handle that). All of this will make more sense once you actually build something more sizable.
 
+To simulate a scenario where you might want to send a file manually (typically you would want to generate some kinds of files on the fly such as bank statements and the like), we can create a `userStatements` folder at the root level in our project directory and drop a [sample bank statement](https://en.wikipedia.org/wiki/Bank_statement#/media/File:BankStatementChequing.png) from Wikipedia into it and title it `BankStatementAndChecking.png`. 
+
+Maybe instead of our site being a blog site of some sort it is a vacation site, where maybe you buy stuff and they store stuff for you, but maybe you want to see your statement too. We can copy the contents of `welcome.ejs` into a new `welcomeBank.ejs` view in the `views` folder and then change it to be the following:
+
+```javascript
+<link rel="stylesheet" type="text/css" href="/stylesheets/styles.css">
+<div class="login-page">
+  <div class="form">
+    <h1>Welcome back to the site, <%= username %>!</h1>
+    <a href="/story/1">Story 1</a>
+    <a href="/story/2">Story 2</a>
+    <a href="/story/3">Story 3</a>
+    <a href="/statement">Download your statement</a>
+    <p><a href="/logout">Log out</a></p>
+  </div>
+</div>
+```
+
+You have no doubt seen something like the above where you could download a statement or something else. You would expect a PDF probably or something similar. In a production environment, these kinds of files would be generated on the fly--you wouldn't have a folder with a pre-built PDF or PNG of every user's activity (most users wouldn't even want it so it would be an unnecessary strain in all regards). We're not going to dynamically generate images or documents or anything like that right now so we're just going to use a dummy folder with a dummy picture in it for right now. Based on the above code, we now need a `GET` route for `/statement`. 
+ 
+It should be clear that such content (i.e., a bank statement) could *never* be put in the `public` folder. It contains sensitive data! This data can only be sent back in a public manner. So what are our options? Well, we could try `res.sendFile` like so:
+
+```javascript
+res.sendFile(path.join(__dirname, 'userStatements/BankStatementAndChecking.png'))
+```
+
+So with `path` we will go to the file system, with `__dirname` we'll grab the directory our server script is in, grab the particular file we are interested in, and send that back across the wire (make sure you have the `path` module included). What might be the problem with this? The problem is that with `sendFile` the browser is going to interpret that as, "Oh, I'm supposed to load this file up." So if you do this then the browser will simply load up the image (i.e., your screen will simply be the image). And maybe that's what you want, but if the user wants to download the image then you've just forced them to have to right click it and save as and so forth. Not good user experience! 
+
+If we want to get more insight about how to possibly make a better user experience, we can head over to Postman and send a `GET` request to `http://localhost:3000/statement` and then inspect the headers. We will see a `Content-Type` header with a value of `image/png`. We will see how to use this in just a second. The thing to know is that the response object actually has a download method: 
+
+``` BASH
+res.download(path [, filename] [, options] [, fn])
+```
+
+As always, [the docs](https://expressjs.com/en/4x/api.html#res.download) will be our friend here. This is worth reproducing in full below.
+
+---
+
+**From the docs:** Beginning note: The optional `options` argument is supported by Express v4.16.0 onwards.
+
+This (i.e., `res.download`) transfers the file at `path` as an “attachment”. Typically, browsers will prompt the user for download. By default, the `Content-Disposition` header “filename=” parameter is `path` (this typically appears in the browser dialog). Override this default with the `filename` parameter.
+
+When an error occurs or transfer is complete, the method calls the optional callback function `fn`. This method uses [res.sendFile()](https://expressjs.com/en/4x/api.html#res.sendFile) to transfer the file.
+
+The optional `options` argument passes through to the underlying [res.sendFile()](https://expressjs.com/en/4x/api.html#res.sendFile) call, and takes the exact same parameters.
+
+```javascript
+res.download('/report-12345.pdf')
+
+res.download('/report-12345.pdf', 'report.pdf')
+
+res.download('/report-12345.pdf', 'report.pdf', function (err) {
+  if (err) {
+    // Handle error, but keep in mind the response may be partially-sent
+    // so check res.headersSent
+  } else {
+    // decrement a download credit, etc.
+  }
+})
+```
+
+---
+
+Basically, the simple use for `res.download` includes passing two arguments:
+
+1. The filename
+2. Optionally, what you want the filename to download as (i.e., a different name than what it actually is)
+
+We have the first part already in `path.join(__dirname, 'userStatements/BankStatementAndChecking.png')`. For the second part, maybe we don't want it coming through as `BankStatementAndCheking.png`. Maybe we want it as `JimsStatement.png` or maybe we want to even personalize it using a cookie set earlier when the user logged in:
+
+```javascript
+const {username} = req.cookies;
+res.download(path.join(__dirname, 'userStatements/BankStatementAndChecking.png'), `${username}sStatement.png`)
+```
+
+If we put this in our file right now, to see the change reflected, we need to clear the cache and hard reload. In Chrome, open the console and then right-click the refresh wheel and choose "Empty Cache and Hard Reload". You will not get that option unless you have the console open. (We have to do this because we need to break the cache because Chrome has decided how to handle `/statement`.) 
+
+If we again look at this happening in Postman, then again we see `Content-Type` header with `image/png` as the value, but what we get now that we *did not* get before is a new header `Content-Disposition`:
+
+``` BASH
+Content-Disposition -> attachment; filename="FredsStatement.png"
+```
+
+This was not set last time and now it is--this time it is set to attachment and it has a filename set for `FredsStatement.png`. If you are using Postman to simulate this process, then you will need to navigate to the Body tab and under `x-www-form-urlencoded` enter key-values of `username: Fred` and `password: x` and issue a `POST` request to `http://localhost:3000/process_login`. Our server will then set the `username` cookie and Postman will have access to this and you can see it in the Cookies tab below where Body, Cookies, Headers, and Test Results tabs exist. 
+
+The main thing `res.download` is going to do for you is to set the `Content-Disposition` header. Then it's going to call `res.sendFile` to actually send the file. So basically we set the `Content-Disposition` header and *then* we call `res.sendFile` with the file. The browser sees the `Content-Disposition` header as an `attachment` and then concludes, "Oh, I'm supposed to download this. I'm not supposed to render this." To recap, `res.download` is setting the appropriate headers for us so we can architect as good a user experience as possible! Specifically, it is setting the `Content-Disposition` header to `aatchment` with a `filename` of whatever the second argument is that we passed to `res.download` or the "actual" filename if we didn't pass the optional second argument. 
+
+This is great! We could accomplish roughly the same behavior by doing the following instead:
+
+```javascript
+res.set('Content-Disposition', 'attachment');
+res.sendFile
+```
+
+But why do it manually when `res.download` comes built-in and does it for us (because Express knows this is a commonly desired feature)? Express even has another response method for this kind of behavior: `res.attachment([filename])`. As [the docs](https://expressjs.com/en/4x/api.html#res.attachment) note: This (i.e., `res.attachment`) sets the HTTP response `Content-Disposition` header field to “attachment”. If a `filename` is given, then it sets the `Content-Type` based on the extension name via [res.type()](https://expressjs.com/en/4x/api.html#res.type), and sets the `Content-Disposition` “filename=” parameter:
+
+```javascript
+res.attachment()
+// Content-Disposition: attachment
+
+res.attachment('path/to/logo.png')
+// Content-Disposition: attachment; filename="logo.png"
+// Content-Type: image/png
+```
+
+All this to say: `res.download` is still probably the most intuitive and useful to use. Finally, one last thing to note about `res.download`: There is a third optional argument that can be used beyond just the filepath to the file desired to be downloaded (first arg) or what we want the filename to be called upon download (the second, optional arg). This third (optional) argument is a callback function that comes with an `error` object that is executed once everything is done:
+
+```javascript
+res.download(path.join(__dirname, 'userStatements/BankStatementAndChecking.png'), `${username}sStatement.png`, (error) => {
+  console.log(error)
+})
+```
+
+So above, if an error occurs, we'll know. Note again that the callback won't be run until the file transfer is complete. Something else to note here (and this really is the potentially sticky issue): If there is an error in sending the file, the headers may already be sent. That means you have already done your `res`. You don't get another `res.json()` or `res.send()` or something like that. We *cannot* do something like what you may be thinking:
+
+```javascript
+res.download(path.join(__dirname, 'userStatements/BankStatementAndChecking.png'), `${username}sStatement.png`, (error) => {
+  res.redirect('/download/error')
+})
+```
+
+The intenion above is clear: If there is an error in the attempt to download a file, then we want to redirect the user to a download error page. But we only get one `res` and if the headers have already been sent, then we simply cannot make this redirect. You'll get this error whenever you try to send the client more than one response (e.g., maybe you have `res.send('<h1>Hi!</h1>')` after a `res.json({message: 'hello'})`). So we're going to have to figure out another way to handle this. Now, a way to figure out if the headers have already been sent is to check a boolean that is made available to us by Express: `res.headersSent`. As [the docs](https://expressjs.com/en/4x/api.html#res.headersSent) note: This is a boolean property that indicates if the app sent HTTP headers for the response:
+
+```javascript
+app.get('/', function (req, res) {
+  console.dir(res.headersSent) // false
+  res.send('OK')
+  console.dir(res.headersSent) // true
+})
+```
+
+So we might do something like the following:
+
+```javascript
+res.download(path.join(__dirname, 'userStatements/BankStatementAndChecking.png'), `${username}sStatement.png`, (error) => {
+  // If there is an error in sending the file, then HTTP headers may already be sent
+  if(error) {
+    // If headers have *not* been sent, then redirect to an error page.
+    if(!res.headersSent) {
+      res.redirect('/download/error')
+    }
+  }
+})
+```
+
+So basically we will redirect the user if headers have *not* already been sent but will have to figure something else out if they have. So we'll only try to redirect them if the headers have not been sent. 
+
+That covers the basics of how to download a file in about a single line. So remember: what `res.download` really does is set the single HTTP header `Content-Disposition` to `attachment` which the browser knows what to do. The browser makes a decision based on that. 
+
+And that is really what you have to remember as your job as a developer: all you have to work with is one response. You send something back to the browser and Firefox, Chrome, Safari, etc., have all agreed what to do if the `Content-Disposition` header is set to `attachment`. That is what a protocol is. You're following the rules. They're (i.e., the browsers) are following the rules. We can't *force* the  browser to do anything. We can only set the headers and then let the browser take over.
 
 ---
 
 </details>
+
+<details><summary> <strong>The router: <code>express.Router([options])</code></strong></summary>
+
+We are now going to take a look at `express.Router([options])`, the other main method we have not yet covered for the methods on the `express` object. The `router` object is almost like a microservices type architecture inside of your Express app--it essentially creates its own little mini application. Its only job is to handle middleware and to handle routes. That's all it does. It behaves like middleware but it's a really nice way to modularize your application. So the `app.get`, `app.post`, etc., that we have been using so far, the router works exactly the same way, but the router works in its own little container. You put it in its own folder to keep things straight. That is a really nice and important thing to do as a developer. Because as a developer when you start working through your application, you start trying to figure out where things are located, and you want to be able to know where the stuff is! That's why we create different directories and subdirectories and so forth. 
+
+So right now consider what we had before as our little log in application:
+
+```javascript
+// Require native node modules
+const path = require('path');
+
+// Require third-party modules
+const express = require('express');
+const app = express(); // invoke an instance of an Express application
+const helmet = require('helmet');
+const cookieParser = require('cookie-parser');
+
+// Middleware used at the application level (i.e., on all routes/requests)
+app.use(helmet());
+app.use(express.static('public'));
+app.use(express.json());
+app.use(express.urlencoded({extended: false}));
+app.use(cookieParser());
+
+// Set default view engine and where views should be looked for by Express
+app.set('view engine', 'ejs');
+app.set('views', [
+  path.join(__dirname + '/views')
+]);
+
+// Custom middleware run at the application level
+app.use((req, res, next) => {
+  if(req.query.msg === 'fail') {
+    res.locals.msg = 'Sorry. This username and password combination does not exist.';
+  } else {
+    res.locals.msg = '';
+  }
+  next();
+})
+
+/////////////// JUST ROUTES BELOW (and where server is listening) ///////////////
+
+app.get('/', (req, res, next) => {
+  res.json({
+    message: 'Sanity check good'
+  });
+})
+
+app.get('/login', (req, res, next) => {
+  res.render('login');
+})
+
+app.post('/process_login', (req, res, next) => {
+  const { username, password } = req.body;
+  if (password === 'x') {
+    res.cookie('username', username);
+    res.redirect(303, '/welcome');
+  } else {
+    res.redirect(303, '/login?msg=fail&test=hello');
+  }
+})
+
+app.get('/welcome', (req, res, next) => {
+  res.render('welcome', req.cookies);
+})
+
+app.param('generalStoryId', (req, res, next, generalStoryId) => {
+  switch(true){
+    case(generalStoryId > 0 && generalStoryId < 366):
+      res.locals.storyType = 'daily';
+      break
+    case(generalStoryId < 1000000):
+      res.locals.storyType = 'news';
+      break
+    case(generalStoryId < 1000000000):
+      res.locals.storyType = 'blog';
+      break
+    default:
+      res.locals.storyType = '';
+      break
+  }
+  next();
+})
+
+app.get('/story/:generalStoryId', (req, res, next) => {
+  const { generalStoryId } = req.params;
+  const { storyType } = res.locals;
+  res.locals.restOfStoryLink = Math.random();
+  res.locals.generalStoryId = generalStoryId;
+  switch(storyType){
+    case('daily'):
+      res.render('daily');
+      break;
+    case('news'):
+      res.render('news');
+      break;
+    case('blog'):
+      res.render('blog');
+      break;
+    default:
+      res.send(`<h1>Woops! Looks like this story does not exist.</h1>`)
+      break;
+  }
+})
+
+app.get('/story/:generalStoryId/:link', (req, res, next) => {
+  const {generalStoryId, link} = req.params;
+  res.send(`<h1>This is the link: ${link}. You are now reading more about story ${generalStoryId}.</h1>`)
+})
+
+app.get('/statement', (req, res, next) => {
+  const {username} = req.cookies;
+  res.download(path.join(__dirname, 'userStatements/BankStatementAndChecking.png'), `${username}sStatement.png`)
+})
+
+app.get('/logout', (req, res, next) => {
+  res.clearCookie('username')
+  res.redirect(303, '/login');
+})
+
+app.listen(3000);
+```
+
+This is not that big *yet*. But as your application grows so will your code base. And if we look at the code above, then at the top we will see all of the middleware used at the application level (i.e., the middleware parsing the body, serving up static files, setting the views, etc.). Right now the routes really aren't so bad, but if you start adding stuff like database access, business logic, etc., then you will suddenly have a monolithic app. The point is that the router makes it very easy to modularize things. 
+
+We are now going to create two new files, `routerApp.js` and `theRouter.js`. The way that our application is going to work is that `routerApp.js` will house our actual application (i.e., all of the middleware we use at the application level, what server we are listening on, etc.). And `theRouter.js` is going to be where the router lives (i.e., where we are going to handle all of our routes). This will make a lot more sense momentarily. 
+
+The `routerApp.js` is easy to create and just like what we have been doing all along (except this time we will not include a view engine--we will response with JSON as if we are building an API).
+
+```javascript
+//routerApp.js
+
+// Third-party modules
+const express = require('express');
+const app = express();
+const helmet = require('helmet');
+
+// Middleware used at the application level
+app.use(helmet());
+app.use(express.json())
+app.use(express.urlencoded());
+app.use(express.static('public'));
+
+//////////////////////////////////////////////////
+// NORMALLY WHERE THE ROUTES WOULD GO
+// WE WANT TO MODULARIZE THIS NOW
+// THIS LOGIC WILL GO IN theRouter.js
+//////////////////////////////////////////////////
+
+app.listen(3000);
+```
+
+That's it. Now let's talk about the construction *process* of `theRouter.js`. Since this will be a different file from `routerApp.js` and we want to use the `Router` method on the `express` object, we actually need `const express = require('express')` at the top of this file. Directly underneath we will create an instance of the `router` object:
+
+```javascript
+const express = require('express');
+let router = express.Router();
+```
+
+As always, check [the docs](https://expressjs.com/en/4x/api.html#express.router) for more about `express.Router([options])`. It's fairly simple: you create a new [router](https://expressjs.com/en/4x/api.html#router) object as we did above: `let router = express.Router();`. Typically, you will probably not want to use the optional `options` parameter (all of the options make things more strict), but it's good to know about them because they specify how the router is to behave (note that `mergeParams` is only available with version `4.5.0+` of Express):
+
+| Property | Description | Default |
+| :-: | :-- | :-- |
+| `caseSensitive` | Enable case sensitivity. | Disabled by default, treating “/Foo” and “/foo” as the same. |
+| `mergeParams` | Preserve the `req.params` values from the parent router. If the parent and the child have conflicting param names, the child’s value take precedence. | `false` |
+| `strict` | Enable strict routing. | Disabled by default, “/foo” and “/foo/” are treated the same by the router. |
+
+As the docs note under this table, you can add middleware and HTTP method routes (such as `get`, `put`, `post`, and so on) to `router` just like an application.
+
+The `router` works the same that the `app` router does. It's just that it's specific to *this* router. The docs have some beginning notes on [the Router object](https://expressjs.com/en/4x/api.html#router) that are worth reproducing below (the docs then simply explore all the methods on the `router` object which we will be exploring ourselves).
+
+---
+**From the docs:** A `router` object is an isolated instance of middleware and routes. You can think of it as a “mini-application,” capable only of performing middleware and routing functions. Every Express application has a built-in app router.
+
+A router behaves like middleware itself, so you can use it as an argument to [app.use()](https://expressjs.com/en/4x/api.html#app.use) or as the argument to another router’s [use()](https://expressjs.com/en/4x/api.html#router.use) method. 
+
+The top-level `express` object has a [Router()](https://expressjs.com/en/4x/api.html#express.router) method that creates a new `router` object.
+
+Once you’ve created a router object, you can add middleware and HTTP method routes (such as `get`, `put`, `post`, and so on) to it just like an application. For example:
+
+```javascript
+// invoked for any requests passed to this router
+router.use(function (req, res, next) {
+  // .. some logic here .. like any other middleware
+  next()
+})
+
+// will handle any request that ends in /events
+// depends on where the router is "use()'d"
+router.get('/events', function (req, res, next) {
+  // ..
+})
+```
+
+You can then use a router for a particular root URL in this way separating your routes into files or even mini-apps.
+
+```javascript
+// only requests to /calendar/* will be sent to our "router"
+app.use('/calendar', router)
+```
+
+---
+
+So instead of using `app.get(...)` as we have done previously, we will now do `router.get(...)`. These two things will do exactly the same thing. The difference is that the `router` in `router.get(...)` is made specifically for this purpose, whereas `app` can do anything and it's done at the application level (hence, `app(lication).get` ). The `router` gives us a little bit more of an option in terms of modularizing the application and creating a nicer long-term architecture. So this is how we will do things from now on and you should too.
+
+So right now we will start with a simple
+
+```javascript
+router.get('/', (req, res, next) => {
+  res.json({
+    msg: 'Router works!'
+  })
+})
+```
+
+where we still have access to the `req`, `res`, and `next` objects just as we did before when using `app`. Why? Recall from the docs: A router behaves like middleware itself, so you can use it as an argument to `app.use()` or as the argument to another router's `use()` method. We have not brought this router into `routerApp.js` yet, but the point is we can put something like `app.use('/', router)`, and this will inform Express that we want to use this router whenever a user makes a request to the root page of our application (note that this will invoke the usage of the router for *any* type of request to `/` because we are utilizing `app.use` instead of `app.get` or something like that). 
+
+So how can we actually use the router in our application? Since `theRouter.js` is a *file*, in order for our application to use or consume it, we are going to need to export it. So we need to drop a little `module.exports = router` which comes straight from Node.js (not an Express-centric thing). This will send back the router to whomever is asking for it via `module.exports`. 
+
+So right now `theRouter.js` would look something like this:
+
+```javascript
+const express = require('express');
+let router = express.Router();
+
+router.get('/', (req, res, next) => {
+  res.json({
+    msg: 'Router works!'
+  })
+})
+
+module.exports = router;
+```
+
+And now we can *use* the router in our application like so:
+
+```javascript
+// Third-party modules
+const express = require('express');
+const app = express();
+const helmet = require('helmet');
+
+// Middleware used at the application level
+app.use(helmet());
+app.use(express.json())
+app.use(express.urlencoded({extended: false}));
+app.use(express.static('public'));
+
+//////////////////////////////////////////////////
+// NORMALLY WHERE THE ROUTES WOULD GO
+// WE WANT TO MODULARIZE THIS NOW
+// THIS LOGIC WILL GO IN theRouter.js
+//////////////////////////////////////////////////
+
+// Routes we want to use at different levels of the application
+const router = require('./theRouter');
+
+// Enlisting the routes brought in to actually use in the application
+app.use('/', router);
+
+app.listen(3000);
+```
+
+So to make use of the router:
+
+1. Import it into the main application: `const router = require('./theRouter')`
+2. Use it in the application where you see fit: `app.use('/', router)`
+
+In truth, we would probably want to import the router for `/` not as `router` but as something more descriptive like `indexRouter`. Similarly, if we want a whole series of middleware and routing to apply whenever a user hits the `/story` route, then we would probably want to have a `storyRouting.js` file (similar to our `theRouter.js` file) that we `require`ed from our application and used like so:
+
+```javascript
+const storyRouter = require('storyRouting');
+app.use('/story', storyRouter);
+```
+
+| Note about `module.exports` and importing files |
+| :--- |
+| If we export *only* the `router` from a file with routing logic like `module.exports = router`, then by default the `router` being exported is considered a default export and we can simply import it, name it whatever we want, and use it by referring to what we have named it. For example, previously we had `const router = require('theRouter')`. We *do not*, and almost always *will not*, refer to the `router` being exported simply as `router`. Usually we will name it so it reflects what kind of routing logic it is supposed to contain. Since the `router` object is often the only thing being exported from a routing file (and hence considered the `default export`), we can name the incoming `router` object whatever we please. That is: `const whatever-name-you-want = require('routerFile')` will work. However, if, for some reason, *more than one* thing is being exported from the routing file, then you will need to be more cautious.<br><br>For example, suppose, for some crazy reason, that our routing file for `/story` had the following at the end of it: `module.exports = { router, bestSport: 'Basketball' };`. Then our application file would need to bring the `router` object in like so: `const { router: storyRouter } = require('storyRouting')`. We are simply using ES6 to destructure and rename since `router` is no longer the default export from `storyRouter.js`. See [this article](https://wesbos.com/destructuring-renaming/) for more about destructuring and renaming. This is not an Express thing, but it's helpful to know. |
+
+So real quick let's review what's happening in our basic `theRouter.js` file:
+
+```javascript
+const express = require('express');
+let router = express.Router();
+
+router.get('/', (req, res, next) => {
+  res.json({
+    msg: 'Router works!'
+  })
+})
+
+module.exports = router;
+```
+
+1. We want to use Express (the `Router` method in particular) so we import the [express](https://www.npmjs.com/package/express) package and name its default export `express`. 
+2. We call the `Router` method on the `express` object and assign the return value to `router`.
+3. We create a whole bunch of middleware and routes in our routing file (right now just one route). The middleware can be standalone (i.e., named or anonymous functions that manipulate `req` and `res` in some way) or used in the routing (i.e., as an anonymous callback function as is being done above). The point, however, is that all the methods we might normally use at the application level with `app.METHOD` are now being used in a more modular, containerized fashion with `router.METHOD`, where the `router` is only going to be applied in the application where we designate with `app.use('/where-to-use-router')`, and this `router` will be used for all requests to `/where-to-use-router` since we utilized `app.use` instead of `app.get` or something else more restrictive. 
+4. We export the `router`. But notice what all has been *added* to the `router`. Did we make any modifications to the `router` object? Of course we did! That is the whole point. We dumped a bunch of logic into the different methods for `router` to actually make use of in our application: `router.get(...logic...)`, `router.post(...logic...)`, etc. If it helps, think of this like adding properties or methods to "normaly" objects in JavaScript. For example, we can declare a normal object like so: `let myDog = { name: 'Bowser' }`. Now let's define a method for `myDog`: `myDog.getName = function() {return this.name};`. Finally, let's actually call this method: `myDog.getName() // Bowser`. Think of this whole process with `router` like what we just did with `myDog`. You attach a bunch of logic to the built-in `get`, `post`, etc., methods on `router` and then this logic fires off once those kinds of requests are made. When we export the `router` object, we export all of the logic we defined for its different methods too. 
+
+<details><summary> <strong>What the exported <code>router</code> object looks like based on methods and middleware you use</strong></summary>
+
+To make the note immediately above more concrete (i.e., that whatever route handling we do with `route.METHOD` or whatever middleware we define and *use* within these routes is basically like tacking on methods for ordinary JavaScript objects), we will take a look under the hood and see what `router` looks like after using `router.METHOD` and associated middleware. First take a look at the beginning of the [the docs](https://expressjs.com/en/4x/api.html#router) about the `router` object: A `router` object is an isolated instance of middleware and routes. You can think of it as a “mini-application,” capable only of performing middleware and routing functions. Every Express application has a built-in app router.
+
+That said, consider the following two files we will use to illustrate what is going on under the hood:
+
+```javascript
+// routerApp.js // this is the main application
+
+// Third-party modules
+const express = require('express');
+const app = express();
+const helmet = require('helmet');
+
+// Middleware used at the application level
+app.use(helmet());
+app.use(express.json())
+app.use(express.urlencoded({extended: false}));
+app.use(express.static('public'));
+
+//////////////////////////////////////////////////
+// NORMALLY WHERE THE ROUTES WOULD GO
+// WE WANT TO MODULARIZE THIS NOW
+// THIS LOGIC WILL GO IN theRouter.js
+//////////////////////////////////////////////////
+
+// Routes we want to use at different levels of the application
+const router = require('./theRouter');
+console.log('This is the imported router: ', router);
+
+// Enlisting the routes brought in to actually use in the application
+app.use('/', router)
+
+app.listen(3000);
+```
+
+And then one of the routes we will export as `router`:
+
+```javascript
+// theRouter.js // our router and the router to be imported into the main application
+
+const express = require('express');
+let router = express.Router();
+
+function validateUser(req, res, next) {
+  res.locals.validated = true;
+  next();
+}
+
+// router.use(validateUser);
+
+router.get('/', (req, res, next) => {
+  res.json({
+    msg: 'Router works!'
+  })
+})
+
+router.post('/', (req, res, next) => {
+  res.json({
+    msg: 'Router works!'
+  })
+})
+
+module.exports = router
+```
+
+We'll get to why `router.use(validateUser)` is commented out momentarily, but let's first see what `router` looks like when we log it to the console after firing up the app:
+
+```
+This is the imported router:  [Function: router] {
+  params: {},
+  _params: [],
+  caseSensitive: undefined,
+  mergeParams: undefined,
+  strict: undefined,
+  stack: [
+    Layer {
+      handle: [Function: bound dispatch],
+      name: 'bound dispatch',
+      params: undefined,
+      path: undefined,
+      keys: [],
+      regexp: /^\/?$/i,
+      route: [Route]
+    },
+    Layer {
+      handle: [Function: bound dispatch],
+      name: 'bound dispatch',
+      params: undefined,
+      path: undefined,
+      keys: [],
+      regexp: /^\/?$/i,
+      route: [Route]
+    }
+  ]
+}
+```
+
+It looks like there's a `stack` property on the `router` object whose value is an array of middleware functions or `Layer`s *used* within the router just imported. Specifically, each `Layer` appears to refer to the middleware we are using for the different `METHODS` on the `router` object. That is, the first `Layer` appears to point to `router.get(...)` and the second layer appears to point to `router.post(...)`. What about the `validateUser` middleware in the `router`? Well, unless we *use* it in the `router`, then it will not get pushed onto the `stack`. So if we now uncomment `router.use(validateUser);`, then we will see something like the following:
+
+```
+This is the imported router:  [Function: router] {
+  params: {},
+  _params: [],
+  caseSensitive: undefined,
+  mergeParams: undefined,
+  strict: undefined,
+  stack: [
+    Layer {
+      handle: [Function: validateUser],
+      name: 'validateUser',
+      params: undefined,
+      path: undefined,
+      keys: [],
+      regexp: /^\/?(?=\/|$)/i,
+      route: undefined
+    },
+    Layer {
+      handle: [Function: bound dispatch],
+      name: 'bound dispatch',
+      params: undefined,
+      path: undefined,
+      keys: [],
+      regexp: /^\/?$/i,
+      route: [Route]
+    },
+    Layer {
+      handle: [Function: bound dispatch],
+      name: 'bound dispatch',
+      params: undefined,
+      path: undefined,
+      keys: [],
+      regexp: /^\/?$/i,
+      route: [Route]
+    }
+  ]
+}
+```
+
+Because the middleware was actually used, this got pushed onto the `stack` of our `router` object. If you're really in the mood, you can investigate this behavior further by digging into the express node module:
+
+```
+node_modules -> express -> lib -> router -> index.js
+```
+
+If you look around in `index.js` you will come across `proto.use = function use(fn) { ... }` and inside of the function body you will see `this.stack.push(layer);`. If you are feeling adventurous, then you can even put `console.log('MIDDLEWARE FUNCTIONS BEING USED: ', this)` right before the final line of the function (i.e., `return this`) to see what `this` refers to. When `app.use(validateUser);` is *not* commented, then the `validateUser` function will show up in the `stack` (along with a bunch of other middleware being used that we don't explicitly interact with like `query`, `expressInit`, `helmet`, `jsonParser`, `urlencodedParser`, `serveStatic`, etc.) 
+
+And really this should make sense given the structure of our very basic application thus far:
+
+```javascript
+// Third-party modules
+const express = require('express');
+const app = express();
+const helmet = require('helmet');
+
+// Middleware used at the application level
+app.use(helmet());
+app.use(express.json())
+app.use(express.urlencoded({extended: false}));
+app.use(express.static('public'));
+
+const router = require('./theRouter');
+
+app.use('/', router)
+
+app.listen(3000);
+```
+
+Given the above, is it any surprise to find `expressInit`, `helmet`, `jsonParser`, etc.? Simply recall what `res.json` does. It parses JSON for us and it is based on the `body-parser` node module. If we do a quick search we can even see the `jsonParser` function being exported:
+
+```
+node_modules -> body-parser -> lib -> types -> json.js
+```
+
+You will see in this file `module.exports = json`. Well what is `json`? It's a function that *returns* `jsonParser`, where `jsonParser` is middleware because it has access to `req`, `res`, and `next`, made evident in the signature of the function. 
+
+The point of *all* of this is simply to emphasize that within whatever routing file you create, the `router` object you define and subsequently apply middleware to (whether it's middleware anonymous callback functions within `METHODS` on `router` such as `get`, `post`, etc.) is going to be part of the `router` object you export. Basically, the routing file you create is just a way of building the `router` object for a certain route which you then export to the main application and *use* at the application level on the designated/desired route. 
+
+---
+
+</details>
+
+By including `app.use('/', router);` in our main application, let's consider what we are effectively communicating to Express. The `'/', router` in `app.use('/', router);` is regular ole middleware. It means, "Hey, `app`! At the `/` path, I want you to use this thing: `router`." That means that everything in the file from which `router` came is going to be used at the `/` route. 
+
+This next point is incredibly important and basically how all of the routing is structured/configured: All of the paths in the routing file are relative to the path specified in `app.use`. That is, if we have a file `storyRouting.js` that exports a router we call `storyRouter` in the main application, where subsequently we declare `app.use('/story', storyRouter);` in the main application, then this means that *all* of the routes in `storyRouting.js` are relative to `/story` since that was the path specified in `app.use('/story', storyRouter);`.
+
+Essentially, this is like prepending `/story` to *every* route in `storyRouting.js`. The `storyRouting.js` file is only meant to handle requests (of any kind) to `/story`. To put it more clearly, suppose we had the following routes in our main application (much as we used to do by including *all* of the routing in our main application regardless of the path):
+
+```javascript
+app.get('/story/topic', ...);
+app.post('/story/topic', ...);
+app.get('/story/author/:authorId', ...);
+app.post('/story/title/:authorId');
+// ...
+app.get('/television/show/:showId', ...);
+app.get('/television/review/:reviewId', ...);
+app.delete('/television/show/:showId', ...);
+app.put('/television/review/edit/:reviewerId', ...);
+// ...
+```
+
+Notice a pattern? We're handling a lot of traffic to `/story` as well as to `/television`. You can imagine a bunch of other traffic for different routes depending on the application. We can clean up the code above by creating routers to handle the `/story` and `/television` routes separately. In our main application, we would first probably build a `routes` folder to house all of our routes and then include  something like the following:
+
+```javascript
+// import routers 
+const storyRouter = require('./routes/storyRouting'); // import router from storyRouting.js
+const televisionRouter = require('./routes/televisionRouting'); // import router from televisionRouting.js
+
+// use routers in main application
+app.use('/story', storyRouter);
+app.use('/television', televisionRouter);
+```
+
+Then our `storyRouting.js` file would look something like this:
+
+```javascript
+// storyRouting.js
+const express = require('express');
+let router = express.Router();
+
+router.get('/topic', ...);
+router.post('/topic', ...);
+router.get('/author/:id', ...);
+router.post('/title/:authorId');
+// ...
+module.exports = router     // <-- imported as storyRouter in main application
+```
+
+And our `televisionRouting.js` file would look something like this: 
+
+```javascript
+// televisionRouting.js
+const express = require('express');
+let router = express.Router();
+
+router.get('/show/:showId', ...);
+router.get('/review/:reviewId', ...);
+router.delete('/show/:showId', ...);
+router.put('/review/edit/:reviewerId', ...);
+// ...
+module.exports = router     // <-- imported as televisionRouter in main application
+```
+
+The idea is that we can have lots of routers that only trigger based on requests to certain paths. All of this may seem somewhat abstract at first, but it's nothing we haven't seen before. `app.use` in general simply means, "Hey, we're about to add some middleware to our application." In the case of something like `app.use('/story', storyRouter);`, it still means the same thing: "Hey, I want to add a bunch of middleware to my application for any kind of request to the `/story` route and I want the middleware defined in `storyRouter` to apply to such requests." 
+
+One thing to note, which you saw if you looked at the note about what the exported `router` actually likes like from a file that is exporting a router to use in the application, is what `router.use` is all about. Just like `app.use` means, "Hey, I want to apply some middleware to this application for any kind of request.," we have `router.use` which similarly means, "Hey, I want to apply some middleware to THIS ROUTER for any kind of request (i.e., the middleware will be applied to any request that hits the path for which our router is handling traffic)." So again this makes sense in light of thinking of routers as almost defining their own little mini applications. 
+
+This is very nice because it keeps our middleware as well as our routes separate from the main application. The router is almost a way to create a bunch of tiny little applications inside of your main app sort of like a microservices kind of architecture. The router will allow you to keep your main application very clean. You will have in the main application things that need to be done everywhere. 
+
+---
+
+</details>
+
+
 
 ## Course Questions to Follow Up On
 
