@@ -2350,9 +2350,437 @@ Long story short: It's a good idea to explicitly pass the `status` value to `res
 
 </details>
 
-<details open><summary> <strong>Getting data from the query string: <code>req.query</code></strong></summary>
+<details><summary> <strong>Getting data from the query string: <code>req.query</code></strong></summary>
 
-TBD
+Recall how we handled a `POST` to the `process_login` route:
+
+```javascript
+app.post('/process_login', (req, res, next) => {
+  const { username, password } = req.body;
+  if (password === 'x') {
+    res.cookie('username', username);
+    res.redirect(303, '/welcome');
+  } else {
+    res.redirect(303, '/login?msg=fail');
+  }
+})
+```
+
+We've explored in detail what happens when the password is `x`, but what happens when the password isn't `x`? It's clear we redirect the user back to the `/login` route using a `GET` request, but we tack something else onto the route: `?msg=fail`. What's the deal with the `?`? 
+
+The `?` is a special character in a URL. The `?` is almost like a delimiter in a URL that say, "Every part after me is a part of the query string. Everything before me is part of the actual path, the domain, the protocol, etc. So the web server will stop caring *period* from `?` onward. The `?` denotes the beginning of the query string and then you have key-value pairs after it. If you want to have more than one key-value pair (we only have one with `msg=fail`), then we can use an ampersand (i.e., `&`) to denote another key-value pair in the query string. For example, we could have `'/login?msg=fail&consolation=boohoo'`. So the keys here are `msg` and `consolation` while their values are `fail` and `boohoo`, respectively. 
+
+Definitely read [the Wiki](https://en.wikipedia.org/wiki/Query_string) entry on query strings. It's useful to know their history, background, and usage. Also make sure to read [the docs](https://expressjs.com/en/4x/api.html#req.query) on `req.query` (all included below because of some of the useful examples the docs include):
+
+---
+
+**From the docs:** This property (i.e., `req.query`) is an object containing a property for each query string parameter in the route. When [query parser](https://expressjs.com/en/4x/api.html#app.settings.table) is set to disabled, it is an empty object {}, otherwise it is the result of the configured query parser.
+
+*Note:* As `req.query`’s shape is based on user-controlled input, all properties and values in this object are untrusted and should be validated before trusting. For example, `req.query.foo.toString()` may fail in multiple ways, for example `foo` may not be there or may not be a string, and `toString` may not be a function and instead a string or other user-input.
+
+*Examples:*
+
+```javascript
+// GET /search?q=tobi+ferret
+console.dir(req.query.q)
+// => 'tobi ferret'
+
+// GET /shoes?order=desc&shoe[color]=blue&shoe[type]=converse
+console.dir(req.query.order)
+// => 'desc'
+
+console.dir(req.query.shoe.color)
+// => 'blue'
+
+console.dir(req.query.shoe.type)
+// => 'converse'
+
+// GET /shoes?color[]=blue&color[]=black&color[]=red
+console.dir(req.query.color)
+// => ['blue', 'black', 'red']
+```
+
+---
+
+You can build fairly complicated query strings if you so desire, but that shouldn't be your goal. As an example, consider the following needlessly complicated query string:
+
+```?typical=example&some+space=not+so+common&myFriends=Oscar&myFriends=Andy&myFriends=Angela&myShoe[color]=brown&myShoe[type]=dress&myShoe[brand]=Gucci&myNested[firstNest]=littleNest&myNested[secondNest][unnecessary]=true&myNested[secondNest][useful]=probably+not
+```
+
+If we untangle it to make some sense of it (the "untangled" version below can't be used because of newline issues):
+
+```BASH
+?
+# Typical use case
+typical=example
+# Include some spaces (more typical of values than keys)
+&some+space=not+so+common
+# Build a myFriends array
+&myFriends=Oscar
+&myFriends=Andy
+&myFriends=Angela
+# Build a myShoe object
+&myShoe[color]=brown
+&myShoe[type]=dress
+&myShoe[brand]=Gucci
+# Build an object with an object inside it
+&myNested[firstNest]=littleNest
+&myNested[secondNest][unnecessary]=true
+&myNested[secondNest][useful]=probably+not
+```
+
+The result upon parsing is the `req.query` object:
+
+```
+{
+  typical: 'example',
+  'some space': 'not so common',
+  myFriends: [ 'Oscar', 'Andy', 'Angela' ],
+  myShoe: { color: 'brown', type: 'dress', brand: 'Gucci' },
+  myNested: {
+    firstNest: 'littleNest',
+    secondNest: { unnecessary: 'true', useful: 'probably not' }
+  }
+}
+```
+
+The point is that the query string is a very common way of passing data around the web. Generally speaking, the query string is where you put insecure data. So you don't care about that data. If someone is watching the HTTP traffic on a route or something like that they'll be able to see everything go through in terms of the path requested and the following query string, but they won't be able to see the body (that will be encrypted so long as you are using HTTPS), but they will be able to see the URLs being passed around. So you would never want to put a password or any sensitive data in the query string. 
+
+It's very easy for the browser to pull stuff out of the URL. The browser can't pull stuff out of the HTTP body because that's already happened. But the browser can see the URL so the browser (i.e., meaning front-end JavaScript) can pull data out of the query string if it needs to. The server can pull it out too which is what we are just about to do. 
+
+To illustrate some of this, go to [Google](https://www.google.com/) and submit a search for `Udemy`. If you look at the URL *after* your search is submitted, then you will see something like the following (of course different for you):
+
+```
+https://www.google.com/search?safe=off&source=hp&ei=fEeXXrWqLNeD9PwP8OalmAU&q=Udemy&oq=Udemy&gs_lcp=CgZwc3ktYWIQAzICCAAyBQgAEIMBMgIIADICCAAyAggAMgIIADICCAAyAggAMgUIABCDATIFCAAQgwFKFwgXEhMxMWcxMDRnODlnNzRnMTQyZzc5Sg8IGBILMWcxZzFnMWcxZzFQ0sIDWOvGA2CnyQNoAHAAeAGAAYkBiAGrBJIBAzYuMZgBAKABAaoBB2d3cy13aXqwAQA&sclient=psy-ab&ved=0ahUKEwi12Lu0_eroAhXXAZ0JHXBzCVMQ4dUDCAk&uact=5
+```
+
+And if we break down the query string:
+
+``` BASH
+https://www.google.com/search # protocol (HTTPS), subdomain (www), root domain (google), path (search)
+? # start of query string
+safe=off # maybe filtering out some undesirable results
+&source=hp # some internal meaning to Google (probably meaning user searched from home page)
+&ei=fEeXXrWqLNeD9PwP8OalmAU # also some internal meaning to Google
+&q=Udemy # this is what we care about
+&oq=Udemy
+&gs_lcp=CgZwc3ktYWIQAzICCAAyBQgAEIMBMgIIADICCAAyAggAMgIIADICCAAyAggAMgUIABCDATIFCAAQgwFKFwgXEhMxMWcxMDRnODlnNzRnMTQyZzc5Sg8IGBILMWcxZzFnMWcxZzFQ0sIDWOvGA2CnyQNoAHAAeAGAAYkBiAGrBJIBAzYuMZgBAKABAaoBB2d3cy13aXqwAQA&sclient=psy-ab&ved=0ahUKEwi12Lu0_eroAhXXAZ0JHXBzCVMQ4dUDCAk&uact=5 # another internal
+```
+
+You could just as well enter the following for our own desired results: `https://www.google.com/search?q=Udemy`. All of the other stuff was for Google. They were constructing their own URL. And that is precisely what we are doing with `res.redirect`. Using something like `res.redirect(303, '/login?msg=fail&test=hello');` lets us know what happened (i.e., if the user ended up back at the login page, then we can take action and tack on useful information to the query string).
+
+What could we want to use the query string for? In our case, we are using a view engine, so we are going to want to let the user know that their login failed, but, like in the case of Google, even if this is just an API where you're not using Express as a view engine (think an API for a single page application using React or something entirely different), you can still *use* the information from the query string. If inside the query string the `msg` property happens to equal `fail`, then we will want to let the user know on the screen that something happened. 
+
+One sample use case you can bake into your applications is something like the following for managing login attempts/failures. Say we have the following middleware placed above any of our routes in our code (i.e., to ensure it runs before any HTTP requests are handled):
+
+```javascript
+app.use((req, res, next) => {
+  if(req.query.msg === 'fail') {
+    res.locals.msg = 'Sorry. This username and password combination does not exist.';
+  } else {
+    res.locals.msg = '';
+  }
+  next();
+})
+```
+
+The above code reflects our desire for the following: If the query string has a `msg` property with its value as `fail`, then we want to do is set a local variable that the view engine will be able to see, and the easiest way to do that is to use `res.locals` because the view engine has access to that as does every other piece of middleware throughout. So if someone happens to need to know, for any reason, that the user tried to log in and couldn't (e.g., maybe we have a counter somewhere to try to prevent the user from being able to log in more than 3 times, etc.). The point is we will set `msg` on `res.locals` to indicate an error if there is a failure to log in and otherwise be set to an empty string.
+
+Note that by using this middleware in this way (i.e., at the application level so it runs whenever *any* type of request is issued) we *do not* have to pass `msg` as the second argument to `res.render` to be made available as a local variable to the view that is rendered (because we *always* have access to `res.locals` via the `locals` object in our view). 
+
+---
+
+</details>
+
+<details><summary> <strong>Getting data from parameters (URL wildcards): <code>req.params</code> and <code>and req.param()</code></strong></summary>
+
+As noted in the previous note, the query string is a great way of passing insensitive data through the URL. Another way of passing insensitive data through the URL is through parameters or sort of like through wildcard pieces of the path itself. 
+
+Suppose our `welcome.ejs` view looked like the following:
+
+``` HTML
+<link rel="stylesheet" type="text/css" href="/stylesheets/styles.css">
+<div class="login-page">
+  <div class="form">
+    <h1>Welcome back to the site, <%= username %>!</h1>
+    <a href="/story/1">Story 1</a>
+    <a href="/story/2">Story 2</a>
+    <a href="/story/3">Story 3</a>
+    <p><a href="/logout">Log out</a></p>
+  </div>
+</div>
+```
+
+So we want to give the user some story link options upon logging in. Remember that all anchor tags point toward a `GET` request and right now we don't have a route to handle anything going to `/story`. In fact, we run into a bit of a problem here because presumably each `story` will be roughly similar, but of course we have unique stories themselves. Are we going to write individual route handlers for *every* individual story? Of course not. Imagine the pain that would go into architecting a site that had hundreds of thousands of different routes for individual items that were all structurally similar (e.g., a blog posts):
+
+```javascript
+app.get('/story/1', (req, res, next) => {
+  res.send(`<h1>Story 1</h1>`)
+})
+
+app.get('/story/2', (req, res, next) => {
+  res.send(`<h1>Story 2</h1>`)
+})
+
+app.get('/story/3', (req, res, next) => {
+  res.send(`<h1>Story 3</h1>`)
+})
+```
+
+And that's only with 3 stories! Again, imagine having thousands of stories. Technically, the above code accomplishes what we want. But it stinks. It will be a major headache to manage. It's clogging up our actual routes (three routes that all basically do the same thing), and more to the point, we don't want `res.send` for some piddly HTML. We want to use `res.render` when using a view engine or `res.json` if we're using React, Angular, Vue, or something similar on the other end. So this is not tenable. We're going to make copy/paste errors or we'll need one view that can manage all of it, or we'll want one `res.json` to be able to handle all of it. So rather than getting really fancy with some middleware, Express already has something built in to handle this very thing.
+
+Of course, we will certainly have to come up with a route to handle `GET` requests to `/story`, but we can do so in a way that accounts for individual stories:
+
+```javascript
+app.get('/story/:storyId', (req, res, next) => {
+  res.send(`<h1>Story 1</h1>`)
+})
+```
+
+In a route, anytime something has a `:` in front of it is a wildcard. In the case above, `storyId` is the wildcard, and `storyId` (or whatever you choose to name the wildcard) will match *anything* in the slot following the `:` (unless you append a regular expression following the wildcard name in parentheses which is addressed later in this note--you would do this to restrict what kind of wildcard matching you want whether it be only digits, certain kinds of strings, etc.; if a regular expression is added onto a wildcard and the match fails then nothing will be added on the `req.params` object). What this means is that the route above will trigger if the user goes to `/story/<anything-else>`; that is, it will trigger on `story/1`, `story/2`, `story/3`, and even `/story/hubbadubbabubbub`. Anything in the wildcard spot will be matched--we don't care what it is. We just care that they went to `/story` followed by something else. 
+
+So how do we access the wildcard information? The `req.params` object always exists (its default value is `{}`). As always, visit [the docs](https://expressjs.com/en/4x/api.html#req.params) to find out more. 
+
+---
+
+**From the docs:** This property (i.e., `req.params`) is an object containing properties mapped to the [named route “parameters”](https://expressjs.com/en/guide/routing.html#route-parameters). For example, if you have the route `/user/:name`, then the “name” property is available as `req.params.name`. This object defaults to `{}`.
+
+```javascript
+// GET /user/tj
+console.dir(req.params.name)
+// => 'tj'
+```
+
+When you use a regular expression for the route definition, capture groups are provided in the array using `req.params[n]`, where `n` is the nth capture group. This rule is applied to unnamed wild card matches with string routes such as `/file/*`:
+
+```javascript
+// GET /file/javascripts/jquery.js
+console.dir(req.params[0])
+// => 'javascripts/jquery.js'
+```
+
+If you need to make changes to a key in `req.params`, use the [app.param](https://expressjs.com/en/4x/api.html#app.param) handler. Changes are applicable only to [parameters](https://expressjs.com/en/guide/routing.html#route-parameters) already defined in the route path.
+
+Any changes made to the `req.params` object in a middleware or route handler will be reset.
+
+NOTE: Express automatically decodes the values in `req.params` (using `decodeURIComponent`).
+
+---
+
+Make sure to read the documentation on [route parameters](https://expressjs.com/en/guide/routing.html#route-parameters) in the guide to routing. Lots of useful information there. In particular, the name of route parameters must be made up of "word characters" (i.e., `[A-Za-z0-9_]` or `\w` in regex). Additionally, to have more control over the exact string that can be matched by a route parameter, you can append a regular expression in parentheses at the end of the wildcard:
+
+```
+Route path: /user/:userId(\d+)
+Request URL: http://localhost:3000/user/42
+req.params: {"userId": "42"}
+```
+
+Returning to our own use case, we could have something like the following:
+
+```javascript
+app.get('/story/:storyId', (req, res, next) => {
+  const {storyId} = req.params;
+  // simulate dynamic link generation (would likely be a pull from a database)
+  const link = Math.random();
+  res.send(`<h1>Story ${storyId}. <a href="/story/${storyId}/${link}">[Read more.]</a></h1>`)
+})
+```
+
+So we send the user some HTML that mentions their requested story and its ID. Further suppose we wanted to have an option for the reader to read even more about their story. Then we could link them to another route that made further use of the parameters:
+
+```javascript
+app.get('/story/:storyId/:link', (req, res, next) => {
+  const {storyId, link} = req.params;
+  res.send(`<h1>This is the link: ${link}. You are now reading more about story ${storyId}.</h1>`)
+})
+```
+
+Note that `req.params` contains *all* the wildcards in the route, namely `storyId` and `link` in the example just above, but it could be a lot more. The second route above will only trigger if we have `/story/<something>/<something>` while the first route will only trigger at `/story/<something>`. 
+
+To see this in action in the real world, consider going to an NFL story through ESPN:
+
+```
+https://www.espn.com/nfl/story/_/id/29039828/sources-member-chargers-tests-positive-covid-19
+```
+
+And go to another NFL story:
+
+```
+https://www.espn.com/nfl/story/_/id/29039856/green-bay-packers-hall-famer-willie-davis-dies-85
+```
+
+The `/nfl/story` route is going to be incredibly common at ESPN. The catch here is what comes after the `id`. They developers are going to pull out the story ID the same way we are. Basically for all of the NFL stories we will get the same route except a different `id` and a different `title` after the `id`. This is very useful and very powerful. Query strings are ugly and sort of not cool, whereas keeping your URLs nice and clean is very friendly and these are easy to link to other people because they follow a natural convention. 
+
+It's worth noting that we have to be at least somewhat mindful when organizing our routes. For example, we we wouldn't want to have something like the following:
+
+```javascript
+app.get('/story/:storyId', (req, res, next) => {
+  const {storyId} = req.params;
+  // simulate dynamic link generation (would likely be a pull from a database)
+  const restOfStoryLink = Math.random();
+  res.send(`<h1>Story ${storyId}. <a href="/story/${storyId}/${restOfStoryLink}">[Read more.]</a></h1>`)
+})
+
+// The below route handler will never run as it is because the route above is matched first
+// We could throw a next() on at the end of the above route but that's very poor design
+app.get('/story/:blogId', (req, res, next) => {
+  ...
+})
+```
+
+What you can do if you need something sort of similar to what's communicated above is use `app.param`. As always, [the docs](https://expressjs.com/en/4x/api.html#app.param) have a lot more information. The basic info is that `app.param([name], callback)` takes two arguments:
+
+1. A `param` to look for in the route
+2. The callback to run with the usual suspects (i.e., `req`, `res`, `next`) but also a fourth parameter that is the *value* of the `param` from the first argument. 
+
+The idea is that instead of something like 
+
+```javascript
+app.get('/story/:storyId', (req, res, next) => {
+  // ...
+})
+```
+
+or
+
+```javascript
+app.get('/story/:blogId', (req, res, next) => {
+  // ...
+})
+```
+
+where we tried to handle the story based on whether or not we were dealing with a `storyId` or a `blogId` on the `/story` route, we could bundle the functionality of both into something like 
+
+```javascript
+app.get('/story/:generalStoryId', (req, res, next) => {
+  // ...
+})
+```
+
+but first use `app.param` to effect how the `/story/:generalStoryId` route will behave.
+
+To make it clearer (a code snippet will follow this explanation): Someone shows up on port 3000 with an HTTP request (this kicks everything into action on our server). Before we actually get to any route, `app.param` will run (make sure you place anything using `app.param` *before* your route handlers). We want to check if the route that is about to run (`/story/:generalStoryId` in our case) has the specified parameter in it (in our case `generalStoryId`). That means we want Express to go looking for the various `app.METHOD` handlers and check to see if the one that is going to run has `:<first-arg-to-app.param()>` anywhere inside of the route parameters: if it does, then the `app.param` callback function will run. 
+
+If we have a qualifier, as we would if we had a request to the `/story/<something>` route and had the following in our code
+
+```javascript
+app.param('generalStoryId', (req, res, next, generalStoryId) => {
+  // ...
+})
+
+app.get('/story/:generalStoryId', (req, res, next) => {
+  // ...
+})
+```
+
+then `app.param` gives us a chance to modify the request/response object however we want before the route handler for `'/story/:generalStoryId'` actually executes. As noted above in the skeleton of `app.param`, the usual arguments for the middleware callback function are `req`, `res`, and `next`, but with `app.param` we also get a fourth argument, namely the *value* of the parameter used as the first argument to `app.param`. So the `generalStoryId` in `(req, res, next, generalStoryId)` above is really equivalent to `req.params.generalStoryId` in the actual request object. So it saves you a little bit of typing basically. And you can do anything you want inside of this callback function (just make sure you call `next` at the end of it!). This is very nice as a kind of internal piece of middleware so that instead of having to do a bunch of string-checking or regular expressions to try to figure out whether or not the user is at a route that would qualify for
+
+```javascript
+app.get('/story/:storyId', (req, res, next) => {
+  // ...
+})
+```
+
+or
+
+```javascript
+app.get('/story/:blogId', (req, res, next) => {
+  // ...
+})
+```
+
+we can simply handle our conditional logic in `app.param` and then have a single route handler to take care of things.
+
+---
+
+#### Example
+
+To make the above usage clearer, consider the following very contrived example:
+
+```javascript
+app.param('generalStoryId', (req, res, next, generalStoryId) => {
+  console.log('Param called: ', generalStoryId);
+  /* The conditional logic:
+    - We can modify the request/response objects how we please before they get to our desired route
+    - We can then make use of our logic here in our desired route 
+    - For example, you may want to set any number of local variables or whatever
+  */
+  switch(true){
+    case(generalStoryId > 0 && generalStoryId < 366):
+      res.locals.storyType = 'daily';
+      break
+    case(generalStoryId < 1000000):
+      res.locals.storyType = 'news';
+      break
+    case(generalStoryId < 1000000000):
+      res.locals.storyType = 'blog';
+      break
+    default:
+      res.locals.storyType = '';
+      break
+  }
+  next();
+})
+
+app.get('/story/:generalStoryId', (req, res, next) => {
+  const { generalStoryId } = req.params;
+  const { storyType } = res.locals;
+  // simulate dynamic link generation (would likely be a pull from a database)
+  res.locals.restOfStoryLink = Math.random(); // <-- maybe something from DB
+  res.locals.generalStoryId = generalStoryId;
+  switch(storyType){
+    case('daily'):
+      res.render('daily');
+      break;
+    case('news'):
+      res.render('news');
+      break;
+    case('blog'):
+      res.render('blog');
+      break;
+    default:
+      res.send(`<h1>Woops! Looks like this story does not exist.</h1>`)
+      break;
+  }
+})
+
+app.get('/story/:generalStoryId/:link', (req, res, next) => {
+  console.log('The params: ', req.params)
+  const {generalStoryId, link} = req.params;
+  // the below would likely be res.render based on the link pulled from the DB somehow
+  res.send(`<h1>This is the link: ${link}. You are now reading more about story ${generalStoryId}.</h1>`)
+})
+```
+
+The basic idea is that whenever a request is made to the route `/story/<something>`, how we handle this request is informed by `app.param`. Whatever the `something` is will determine what view is rendered for the user or where they might be sent by
+
+```javascript
+app.get('/story/:generalStoryId', (req, res, next) => {
+  // ...
+})
+```
+
+The above contrived use case is to have a `daily` story rendered if the story id is between 1 and 365, inclusive, etc. `app.param` can be very useful if you're dedicated to representing differently classed things after a single path name. And one of the views could look like 
+
+``` HTML
+<link rel="stylesheet" type="text/css" href="/stylesheets/styles.css">
+<div class="login-page">
+  <div class="form">
+    <p>Welcome to your <%= storyType %> story! You are reading about story <%= generalStoryId %> </p>
+    <p>Click <a href='/story/<%=generalStoryId%>/<%=restOfStoryLink%>'>this link</a> to read more.</p>
+  </div>
+</div>
+```
+
+and another view could look drastically different.
+
+---
+
+</details>
+
+<details open><summary> <strong>Sending files and dealing with "headers already sent" error</strong></summary>
+
+
 
 ---
 
