@@ -4,7 +4,8 @@
   "description": "",
   "main": "loginSite.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "debugStart": "DEBUG=express:* nodemon login-site-sending-files-emphasis.js"
   },
   "keywords": [],
   "author": "",

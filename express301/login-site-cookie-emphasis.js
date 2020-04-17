@@ -28,7 +28,7 @@ app.get('/', (req, res, next) => {
 })
 
 app.get('/login', (req, res, next) => {
-  res.render('login');
+  res.render('login', {msg: ''});
 })
 
 app.post('/process_login', (req, res, next) => {

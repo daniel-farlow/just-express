@@ -3488,6 +3488,887 @@ This is very nice because it keeps our middleware as well as our routes separate
 
 </details>
 
+<details><summary> <strong>Understanding the express generator (and much more)</strong></summary>
+
+One thing to get out of the way right up front: The express generator *does not* include `helmet` by default. So make sure sure you add it as soon as you employ the generator! That said ...
+
+The [express generator](https://expressjs.com/en/starter/generator.html) is *awesome*. A lot of the starter code we write in our files can be abstracted. The express generator is a command line utility that builds out a decent amount of boilerplate code and project structure that we have been doing ourselves repeatedly. 
+
+As [the docs](https://expressjs.com/en/starter/generator.html) note, you can either run `npm install -g express-generator` followed by `express` or just `npx express-generator` to build out the base level of an express app with the default options included (i.e., view engine, css processor if any, etc.). Read [this article](https://dev.to/sarscode/npx-vs-npm-the-npx-advantage-1h0o) about `npx` vs `npm`. Essentially, `npx` ensures you are always getting the latest, stable version of express (as opposed to downloading it globally and then it possibly changing a ways down the road later) so we will use that. 
+
+Generally speaking, the way you will use the generator is as follows:
+
+``` BASH
+npx express-generator --view=ejs --css=sass appName
+```
+
+Some things to note about the above:
+
+- `npx`: You are using `npx` to get the project started
+- `express-generator`: This is the command line utility you want `npx` to execute (kind of like `npx create-react-app` or whatever other kind of command line utility you might use)
+- `--view=`: View engines supported: `ejs|hbs|hjs|jade|pug|twig|vash`. Use `--no-view` instead of you plan not to use a view engine. Defaults to Pug when nothing is specified.
+- `--css`: Processors supported: `less|stylus|compass|sass`. Defaults to plain css when nothing is specified.
+- `appName`: Whatever you want your application/project directory to be called (inside this directory is where all of the boilerplate code will go).
+
+So, for example, we might do something like
+
+``` BASH
+npx express-generator --view=ejs --css=sass generatedApp
+```
+
+to create an Express app in a folder named `generatedApp` that uses EJS as its default view engine and Sass as its default CSS processor. This is the directory structure we would get as a result of this:
+
+```
+generatedApp
+ ┣ bin
+ ┃ ┗ www
+ ┣ public
+ ┃ ┣ images
+ ┃ ┣ javascripts
+ ┃ ┗ stylesheets
+ ┃ ┃ ┗ style.sass
+ ┣ routes
+ ┃ ┣ index.js
+ ┃ ┗ users.js
+ ┣ views
+ ┃ ┣ error.ejs
+ ┃ ┗ index.ejs
+ ┣ app.js
+ ┗ package.json
+```
+
+Notice the lack of any `node_modules`. As the docs note, as soon as we create the folder that houses our project, we need to `cd` into that folder and run `npm install` to download all of the project dependencies (we do not need to run `npm init` because we already have a `package.json` that lists all of the dependencies we will need to install--these dependencies are installed via `npm install`). 
+
+Take a look back at the directory structure! It's very similar to everything we have done up to this point. We have `public`, `routes`, and `views` folders. Everything is structured as we might hope/expect except for one minor funky thing with a `bin` folder that actually represents the entry point for our application. 
+
+<details><summary> <strong>A (lengthy) note about <code>bin/www</code></strong></summary>
+
+[This question](https://stackoverflow.com/questions/23169941/what-does-bin-www-do-in-express-4-x) and [this question](https://stackoverflow.com/questions/36638123/learning-node-js-express-js-whats-the-deal-with-bin-www/36638353#36638353) on Stack Overflow can shed some light. Essentially, the idea is that `app.js` (not in `bin`) contains all the middleware and routes you need to get started and at the bottom it exports the `app` object. Thus far, we always had a sort of "main application" file where we used `app.listen(3000);`, but what do we have now? Furthermore, where is our `app` actually `require`d if we are exporting it?
+
+It makes sense that our `app` would be `require`d in `www` in `bin` since `www` is the entry point for our application, but what is going on in `www` that actually makes it the entry point of our application? What does `www` accomplish? To answer this, we really need to take a walk down memory lane (when we first built a server in Node.js only without any Express). In particular, we need to look at [the docs](https://expressjs.com/en/4x/api.html#app.listen) for `app.listen` or `app.listen([port[, host[, backlog]]][, callback])` (reproduced below to add as much useful context as possible, along with personal notes):
+
+---
+
+#### Walk down memory lane (personal notes informed by documentaton)
+
+`app.listen([port[, host[, backlog]]][, callback])` binds and listens for connections on the specified host and port. This method is identical to Node's [http.Server.listen()](https://nodejs.org/api/http.html#http_server_listen). From [the docs](https://nodejs.org/api/http.html#http_server_listen) for `server.listen()`: Starts the HTTP server listening for connections. Well, how do we create an HTTP server on which to listen for connections? We use `http.createServer` or, more completely, `http.createServer([options][, requestListener])`. Useful default `options` are taken care of for us, but we almost always want to pass in a `requestListener` which is a `Function` (why wouldn't you want to listen to requests to your server!?). What does `http.createServer` return? An HTTP server hopefully! Yes, it returns a new instance of [http.Server](https://nodejs.org/api/http.html#http_class_http_server), where the `requestListener` is a function which is automatically added to the ['request'](https://nodejs.org/api/http.html#http_event_request) event. Well, note that `Class: http.Server` has `server.listen()` as a method for whatever HTTP `server` we are considering.
+
+Why is any of this important? Well, to truly walk down memory lane, recall our basic Node.js server where we didn't use any Express at all and tried to handle the most basic of routing situations:
+
+```javascript
+const http = require('http');
+const fs = require('fs');
+
+const server = http.createServer((req, res) => {
+  if (req.url === '/') {
+    res.writeHead(200, { 'content-type': 'text/html' });
+    const homePageHTML = fs.readFileSync('node.html');
+    res.write(homePageHTML);
+    res.end();
+  } else if (req.url === "/node.png") {
+    res.writeHead(200, { 'content-type': 'image/png' });
+    const image = fs.readFileSync('node.png');
+    res.write(image);
+    res.end();
+  } else if (req.url === "/styles.css") {
+    res.writeHead(200, { 'content-type': 'text/css' });
+    const css = fs.readFileSync('styles.css');
+    res.write(css);
+    res.end();
+  } else {
+    res.writeHead(404, { 'content-type': 'text/html' });
+    res.write(`<h4>Sorry, this isn't the page you're looking for!</h4>`)
+    res.end()
+  }
+});
+
+server.listen(3000);
+```
+
+Notice that we set `server` to `http.createServer(...)` where the `...` was just a big `requestListener` function that served as the basis for our painfully tedious little app/server. This `requestListener` function literally *is* our application in this case. That is, we listen for requests and we handle them with our `requestListener` function. 
+
+And this is really what is going on behind the scenes in Express (remember Express *is* Node). Without using anything from Express, the key to our plain Node.js application was the following:
+
+```javascript
+const http = require('http'); // <-- make use of native http module
+
+const server = http.createServer((req, res) => { // <-- create an instance of an http server and pass it an anonymous requestListener function
+  // ... <-- a bunch of ways defining how to respond to requests to different routes
+});
+
+server.listen(3000); // <-- call the listen method on the http server instance and pass it a port number
+```
+
+We could accomplish the same thing in Express using the express and http modules:
+
+```javascript
+const http = require('http');
+const express = require('express');
+const app = express();
+
+// app.METHODS <-- define requestListeners for METHOD requests to specified routes
+
+http.createServer(app).listen(3000); // <-- call the listen method on http server instance with port number
+```
+
+The specific thing to note here is that `app` *is* the `requestListener` function we pass to `http.createServer`. But instead of defining `app` in place as an anonymous function as the `requestListener` argument to `http.createServer`, as we did with the plain Node.js server, we actually modify the base `app` function considerably by using things like `app.get`, `app.post`, `app.use`, `app.SOMETHING` *before* passing it to `http.createServer`. In fact, if we're really in the mood, then we can "refactor" the plain Node.js application/server as follows:
+
+```javascript
+const http = require('http');
+const fs = require('fs');
+const app = function (req, res) {
+  if (req.url === '/') {
+    res.writeHead(200, { 'content-type': 'text/html' });
+    const homePageHTML = fs.readFileSync('node.html');
+    res.write(homePageHTML);
+    res.end();
+  } else if (req.url === "/node.png") {
+    res.writeHead(200, { 'content-type': 'image/png' });
+    const image = fs.readFileSync('node.png');
+    res.write(image);
+    res.end();
+  } else if (req.url === "/styles.css") {
+    res.writeHead(200, { 'content-type': 'text/css' });
+    const css = fs.readFileSync('styles.css');
+    res.write(css);
+    res.end();
+  } else {
+    res.writeHead(404, { 'content-type': 'text/html' });
+    res.write(`<h4>Sorry, this isn't the page you're looking for!</h4>`)
+    res.end()
+  }
+}
+
+const server = http.createServer(app);
+
+server.listen(3000);
+```
+
+This should make sense! Recall that `app` returned by `express()` is in fact a JavaScript `Function`, namely `createApplication`. Remember inspecting the express node module when we first started looking at Express? 
+
+```
+node_modules -> express -> lib -> express.js
+```
+
+And in `express.js` we saw `exports = module.exports = createApplication` and right below this line:
+
+```javascript
+function createApplication() {
+  var app = function(req, res, next) {
+    app.handle(req, res, next);
+  };
+
+  mixin(app, EventEmitter.prototype, false);
+  mixin(app, proto, false);
+
+  // expose the prototype that will get set on requests
+  app.request = Object.create(req, {
+    app: { configurable: true, enumerable: true, writable: true, value: app }
+  })
+
+  // expose the prototype that will get set on responses
+  app.response = Object.create(res, {
+    app: { configurable: true, enumerable: true, writable: true, value: app }
+  })
+
+  app.init();
+  return app;
+}
+```
+
+Hence, invoking `express()` causes a default export of the `createApplication` function which itself returns an initialized `app` capable of handling the request and response objects for HTTP traffic. Notice that the `app` returned is what we have been dealing with from the start in "Express land": a middleware function.
+
+So if
+
+```javascript
+const http = require('http');
+const express = require('express');
+const app = express();
+
+// app.METHODS <-- define requestListeners for METHOD requests to specified routes
+
+http.createServer(app).listen(3000); // <-- call the listen method on http server instance with port number
+```
+
+works just fine, then what is `app.listen` in Express really doing anyway? Inspect the node modules (the docs tell us too):
+
+```
+node_modules -> express -> lib -> application.js
+```
+
+Towards the end of the file you will see something like the following:
+
+```javascript
+/**
+ * Listen for connections.
+ *
+ * A node `http.Server` is returned, with this
+ * application (which is a `Function`) as its
+ * callback. If you wish to create both an HTTP
+ * and HTTPS server you may do so with the "http"
+ * and "https" modules as shown here:
+ *
+ *    var http = require('http')
+ *      , https = require('https')
+ *      , express = require('express')
+ *      , app = express();
+ *
+ *    http.createServer(app).listen(80);
+ *    https.createServer({ ... }, app).listen(443);
+ *
+ * @return {http.Server}
+ * @public
+ */
+
+app.listen = function listen() {
+  var server = http.createServer(this);
+  return server.listen.apply(server, arguments);
+};
+```
+
+That's it! As [the docs](https://expressjs.com/en/4x/api.html#app.listen) note and we explicitly see above in the source code: the `app.listen()` method returns an `http.Server` and (for HTTP) is a convenience method for the relevant part of what we see above: 
+
+```javascript
+app.listen = function listen() {
+  var server = http.createServer(this);
+  return server.listen.apply(server, arguments);
+};
+```
+
+This is literally the same thing we did with the following code:
+
+```javascript
+const http = require('http');
+const express = require('express');
+const app = express();
+
+// app.METHODS <-- define requestListeners for METHOD requests to specified routes
+
+http.createServer(app).listen(3000); // <-- call the listen method on http server instance with port number
+```
+
+So really `app.listen()` is exactly what it claims itself to be: a convenience method. We don't have to write
+
+```javascript
+app.listen = function listen() {
+  var server = http.createServer(this);
+  return server.listen.apply(server, arguments);
+};
+```
+
+every time. We can simply write `app.listen(port-number)`. As the docs further note, the `app` returned by `express()` is *designed* to be passed to Node's HTTP servers as a callback to handle requests. This makes it easy to provide both HTTP and HTTPS versions of your app with the same code base, as the app does not inherit from these (it is simply a callback):
+
+```javascript
+var express = require('express')
+var https = require('https')
+var http = require('http')
+var app = express()
+
+http.createServer(app).listen(80)
+https.createServer(options, app).listen(443)
+```
+
+#### End of walk down memory lane
+
+---
+
+What does *all* of the above have to do with `bin/www`? Well, if you look at the `www` file, then you will see that nearly all of the code is really error handling. The code relevant to us, and everything noted above, is the following super trimmed down version (only relevant code reproduced below):
+
+```javascript
+var app = require('../app'); // <-- import our beefy application/requestListener function
+var http = require('http'); // <-- import native http module so we can create and HTTP server
+var port = normalizePort(process.env.PORT || '3000'); // <-- get port from environment (or 3000 by default)
+app.set('port', port); // <-- set port as the port number declared and initialized above
+var server = http.createServer(app); // <-- create HTTP server and pass it app as requestListener function
+server.listen(port); // <-- listen on provided port
+```
+
+So to summarize: `www` creates an `httpServer` and passes your `app`
+as the `requestListener` function, where `app` was initially created by `express()` and thereafter heavily modified by you in order for your application to behave as desired based on HTTP requests since `app` is, after all, just a beefed up `requestListener` function. 
+
+Besides this, `www` also sets the port via `server.listen(port)` where `port` is either an environment variable accessed and then used or is set to 3000 by default (unless overridden by the user manually directly in `www` or via an environment variable as just mentioned). Additonally, `www` sets the functions to be called if there is an error while starting the server: `server.on('error', onError)`.
+
+In sum, `www` basically removes all the create and start server code from your `app.js` and lets you focus only on the application logic part. 
+
+---
+
+</details>
+
+
+<details><summary> <strong>A note about <code>package.json</code> based on options you pass to express generator; and error-handling in Express</strong></summary>
+
+It should make sense that our `package.json` will look different based on what kind of options we pass to the express generator (since `package.json` lists all of our project dependencies). Of course, the `package.json` may look different in all sorts of cases but the biggest ones will be the following:
+
+1\. Include a view engine (e.g., `ejs|hbs|hjs|jade|pug|twig|vash`) *and* a CSS engine (e.g., `less|stylus|compass|sass`)
+- Example generator code: `npx express-generator --view=ejs --css=sass generatedApp`
+- Resultant `package.json`:
+
+  ```javascript
+  // view engine (ejs) and CSS engine (sass)
+  {
+    "name": "generatedapp",
+    "version": "0.0.0",
+    "private": true,
+    "scripts": {
+      "start": "node ./bin/www"
+    },
+    "dependencies": {
+      "cookie-parser": "~1.4.4",
+      "debug": "~2.6.9",
+      "ejs": "~2.6.1",
+      "express": "~4.16.1",
+      "http-errors": "~1.6.3",
+      "morgan": "~1.9.1",
+      "node-sass-middleware": "0.11.0"
+    }
+  }
+  ```
+
+2\. Include a view engine but no CSS engine
+- Example generator code: `npx express-generator --view=hbs appWithViewPlainCSS`
+- Resultant `package.json`:
+
+  ```javascript
+  // view engine (hbs) but no CSS engine (plain css)
+  {
+    "name": "appwithviewplaincss",
+    "version": "0.0.0",
+    "private": true,
+    "scripts": {
+      "start": "node ./bin/www"
+    },
+    "dependencies": {
+      "cookie-parser": "~1.4.4",
+      "debug": "~2.6.9",
+      "express": "~4.16.1",
+      "hbs": "~4.0.4",
+      "http-errors": "~1.6.3",
+      "morgan": "~1.9.1"
+    }
+  }
+  ```
+
+3\. Do not include a view engine but do include a CSS engine
+- Example generator code: `npx express-generator --no-view --css=less appWithoutViewLessCSS`
+- Resultant `package.json`:
+
+  ```javascript
+  // no view engine but uses a CSS engine (less)
+  {
+    "name": "appwithoutviewlesscss",
+    "version": "0.0.0",
+    "private": true,
+    "scripts": {
+      "start": "node ./bin/www"
+    },
+    "dependencies": {
+      "cookie-parser": "~1.4.4",
+      "debug": "~2.6.9",
+      "express": "~4.16.1",
+      "less-middleware": "~2.2.1",
+      "morgan": "~1.9.1"
+    }
+  }
+  ```
+
+Notice the dependencies that are included in *all* cases:
+
+- `cookie-parser` 
+  + **Description:** Parse `Cookie` header and populate `req.cookies` with an object keyed by the cookie names. Optionally you may enable signed cookie support by passing a `secret` string, which assigns `req.secret` so it may be used by other middleware. [See [the docs](https://www.npmjs.com/package/cookie-parser).]
+- `debug`
+  + **Description:** A tiny JavaScript debugging utility modelled after Node.js core's debugging technique. Works in Node.js and web browsers. [See [the docs](https://www.npmjs.com/package/debug)]
+  + **Note:** The Express docs actually have a [section on debugging](https://expressjs.com/en/guide/debugging.html) that is probably much more useful than consulting the `debug` module docs at the npm site. As noted from the Express docs: Express uses the debug module internally to log information about route matches, middleware functions that are in use, application mode, and the flow of the request-response cycle [e.g., check earlier projects we did and you will see `debug` nestled into the `node_modules` folder]. `debug` is like an augmented version of `console.log`, but unlike `console.log`, you don’t have to comment out `debug` logs in production code. Logging is turned off by default and can be conditionally turned on by using the `DEBUG` environment variable.
+  + **Additional note:** If you want to see all of the internal logs used in Express when testing/building your application, you could add the following line to the `scripts` object in your project `package.json`: `"debugStart": "DEBUG=express:* nodemon login-site-sending-files-emphasis.js"`. And when you wanted to see everything logged so you have thorough debugging capability and to see what all Express is logging, you could execute `npm run debugStart` from within your project directory, effectively executing the above line. As Express internally uses the `debug` module, you do not have to `require` the debug module in your application to use the script just defined.
+- `express`
+  + **Description:** Fast, unopinionated, minimalist web framework for node. [See [the docs](https://www.npmjs.com/package/express)].
+- `morgan`
+  + **Description:** HTTP request logger middleware for node.js [See [the docs](https://www.npmjs.com/package/morgan)].
+  + **Note:** We see `app.use(logger('dev'));` in our `app.js`. From the docs linked to above for `morgan`, we see the following description for the `dev` option: Concise output colored by response status for development use. The `:status` token will be colored green for success codes, red for server error codes, yellow for client error codes, cyan for redirection codes, and uncolored for information codes. Given the inclusion of `morgan` and what the `dev` option gives, it is unlikely you will want to include something as over the top as the `debugStart` script above.
+
+So what dependencies change from one `package.json` to the next based on options supplied to the express generator? Well, whenever a CSS engine is used, of course the appropriate middleware for that engine is loaded as a dependency (how else would the CSS engine run?). And when a view engine is used, we not only get the view engine added as a dependency (e.g., `hbs`) but also we get the `http-errors` module. Why? [The extremely short answer is that `http-errors` gives us more robust capabilities with handling/creating HTTP errors.]
+
+Well, Express gives you a `views` directory by default when you use the express generator and one of the files in the `views` folder is `error.<view-engine-extension>`. This is meant to provide a view for when the user encounters an error such as a 404 or whatever else they might run into. As made clear from [the docs](https://www.npmjs.com/package/http-errors) for `http-errors`, we have a chance to customize the error messages we respond with by using the `createError` function and passing such functions to `next()`. Why would we call `next` with `createError` as an argument? The Express [docs on error handling](https://expressjs.com/en/guide/error-handling.html) explain why: If you pass anything to the `next()` function (except the string `'route'`), Express regards the current request as being an error and will skip any remaining non-error handling routing and middleware functions.
+
+What are error-handling routing and middleware functions? Read [the docs](https://expressjs.com/en/guide/error-handling.html) starting at the section about the default error handler. Essentially, error-handling middleware functions are defined in the same way as other middleware functions except error-handling functions have four arguments instead of three: `err`, `req`, `res`, and `next`. For example:
+
+```javascript
+app.use(function (err, req, res, next) {
+  console.error(err.stack)
+  res.status(500).send('Something broke!')
+})
+```
+
+Additionally, you define error-handling middleware *last*, after other `app.use()` and routes calls; for example:
+
+```javascript
+var bodyParser = require('body-parser')
+var methodOverride = require('method-override')
+
+app.use(bodyParser.urlencoded({
+  extended: true
+}))
+app.use(bodyParser.json())
+app.use(methodOverride())
+// start defining error-handling middleware
+app.use(function (err, req, res, next) {
+  // logic
+})
+```
+
+It is useful to note that Express comes with a built-in error handler that takes care of any errors that might be encountered in the app. This default error-handling middleware function is added at the end of the middleware function stack. If you pass an error to `next()` and you do not handle it in a custom error handler, it will be handled by the built-in error handler; the error will be written to the client with the stack trace. The stack trace is not included in the production environment.
+
+As the docs note, if you call `next()` with an error after you have started writing the response (for example, if you encounter an error while streaming the response to the client) the Express default error handler closes the connection and fails the request. So when you add a custom error handler, you must delegate to the default Express error handler, when the headers have already been sent to the client:
+
+```javascript
+function errorHandler (err, req, res, next) {
+  if (res.headersSent) {
+    return next(err)
+  }
+  res.status(500)
+  res.render('error', { error: err })
+}
+```
+
+As noted in the docs, we can implement the "catch-all" `errorHandler` function as follows (as an example):
+
+```javascript
+function errorHandler (err, req, res, next) {
+  res.status(500)
+  res.render('error', { error: err })
+}
+```
+
+And this example closely reflects the catch-all error handling at the bottom of the boilerplate `app.js` given to us by the express generator (with `createError` from `http-errors` slightly modified to illustrate possible usage):
+
+```javascript
+// catch 404 and forward to error handler
+app.use(function(req, res, next) {
+  next(createError(404, 'Custom 404 message')); // <-- customize/create HTTP errors, make messages, etc.
+});
+
+// error handler
+app.use(function(err, req, res, next) {
+  // set locals, only providing error in development
+  res.locals.message = err.message;
+  res.locals.error = req.app.get('env') === 'development' ? err : {};
+
+  // render the error page
+  res.status(err.status || 500);
+  res.render('error');
+});
+```
+
+Per the instructions in the docs, this "catch-all" error handling middleware is defined and used *last* (i.e., after `app.use()` and routes calls). 
+
+Finally, the docs give a neat example of how you might want to handle errors in the case of checking whether or not you are dealing with a paid subscriber and whether or not to fetch paid-for content. The basic idea is that if we have a route handler with multiple callback functions, then we can use the `'route'` parameter to skip to the next route handler and shortcircuit any other callbacks being used in the current route:
+
+```javascript
+app.get('/a_route_behind_paywall',
+  function checkIfPaidSubscriber (req, res, next) {
+    if (!req.user.hasPaid) {
+      // continue handling this request
+      next('route')
+    } else {
+      next()
+    }
+  }, function getPaidContent (req, res, next) {
+    PaidContent.find(function (err, doc) {
+      if (err) return next(err)
+      res.json(doc)
+    })
+  })
+```
+
+In this example. the `getPaidContent` handler will be skipped but any remaining handlers in `app` for `/a_route_behind_paywall` would continue to be executed. 
+
+This kind of behavior is well-explained in the docs for how `app.METHOD` (see [here](https://expressjs.com/en/4x/api.html#app.METHOD)) and `router.METHOD` (see [here](https://expressjs.com/en/4x/api.html#router.METHOD)) behave concerning their usage of callback functions. For `app.METHOD(path, callback [, callback ...])` the docs, along with some commentary in light of our journey, indicate the following (same applies to `router.METHOD`):
+
+#### path
+
+The `path` argument is the `path` for which the middleware function is invoked; can be any of:
+
+- A string representing a path. **[This is what we have typically done.]**
+- A path pattern. **[This is what we have done when dealing with parameters and the like or query strings.]**
+- A regular expression pattern to match paths.
+- An array of combinations of any of the above.
+
+See [path examples](https://expressjs.com/en/4x/api.html#path-examples) for more. The default value for `path` is `'/'` (i.e., root path) unless otherwise specified.
+
+#### callback
+
+Callback functions; can be:
+
+- A middleware function. **[This is pretty much what we have always done.]**
+- A series of middleware functions (separated by commas). **[Extremely useful to know: small use case presented in `app.get('/a_route_behind_paywall', ...)` example above.]**
+- An array of middleware functions.
+- A combination of all of the above.
+
+**You can provide multiple callback functions that behave just like middleware, except that these callbacks can invoke `next('route')` to bypass the remaining route callback(s). You can use this mechanism to impose pre-conditions on a route, then pass control to subsequent routes if there is no reason to proceed with the current route.**
+
+See the [middleware callback function examples](https://expressjs.com/en/4x/api.html#middleware-callback-function-examples) section for ideas on how to implement more than just the simple use case of a single callback function as we have done for the most part thus far. Better yet, read [the entire entry](https://expressjs.com/en/4x/api.html#app.use) for `app.use([path,] callback [, callback...])` as it includes a ton of valuable information.
+
+---
+
+</details>
+
+Looking at the `package.json`, we see a `"start": "node ./bin/www"` `script`. So we shouldn't have to provide a path to our application to start running it. We should be able to simply run `nodemon` in the terminal where our application is and all will be right with the world. Why? 
+
+According to the [usage section](https://www.npmjs.com/package/nodemon#usage) of the docs for `nodemon`: If you have a `package.json` file (which we do!) for your app, you can omit the main script (i.e., `www` in the case of the express generator and often `app.js` or somethign else in most other cases) entirely and `nodemon` will read the `package.json` for the `main` property and use that value as the app. `nodemon` will also search for the `scripts.start` property in `package.json` (as of `nodemon` `1.1.x`).
+
+So that last part above is why: `nodemon` will simply search for the `scripts.start` property in our `package.json` and run accordingly. See `nodemon` [FAQ](https://github.com/remy/nodemon/blob/master/faq.md) for more. fun details.
+
+---
+
+</details>
+
+<details><summary> <strong>All about the HTTP headers</strong></summary>
+
+**TLDR:** You can set the response's HTTP header `field` to `value` by using `res.set(field [, value])`, as noted in [the docs](https://expressjs.com/en/4x/api.html#res.set). To set multiple fields at once, simply pass an object as the parameter:
+
+```javascript
+res.set('Content-Type', 'text/plain')
+
+res.set({
+  'Content-Type': 'text/plain',
+  'Content-Length': '123',
+  ETag: '12345'
+})
+```
+
+That said, let's revisit something we discussed at the beginning of the course, namely the request-response cycle and the fact that each request or response *is* an HTTP message, where the message is made up of three things:
+
+1. Start line
+2. Header
+3. Body
+
+Recall that the start line is a *single* line, and it describes the type of request on the way there, and on the way back in the response it's the status:
+
+- **Request:** `method path version-of-HTTP`; for example: `get /blog HTTP/1.1`
+- **Response:** `version-of-HTTP status-code`; for example: `HTTP/1.1 404`
+
+Recall that the headers basically describe the incoming(request)/outgoing(response) body (i.e., content). So essentially the headers contain metadata. The header always comes in the form of key-value pairs (can be thought of in JS almost like JSON). There will always be a blank line between the header and body. And that is to indicate that all of the header is done and that it's time for the body.
+
+Recall that the body is the "actual stuff" or what you may think of as maybe the content or HTML, the image, etc. 
+
+All of the above is what makes up HTTP messages. You have to follow that protocol (Hyper Text Transfer **PROTOCOL**), namely having a start line, header, and body. You can only control these things. It's up to others (i.e., browsers) to follow the protocol as well and to make sense of what you are trying to send. But note that *how* the browser behaves is almost completely determined by the headers. The body is what we work hard to put together for the user, but it's really rather useless if the headers are a mess and don't accurately describe the body. For example, suppose we want to send JSON or an image back to the user but somehow/somewhere we have set the `content-type` header to be `text/plain`. That's going to be rather useless for the user because the browser, presumably because it is following the protocol, is not going to make sense of our body because one of the headers is out of whack.
+
+The point of all this is that anytime you do `res.`: `json`, `render`, `send`, `sendFile`, `download`, `redirect`, etc., you are *not* actually sending back JSON, a webpage, a file, or anything else to the user but an HTTP message. That is what Express does. It handles HTTP traffic via Node.js. And the HTTP message is what we described above: a start line, headers, and the body. As noted above, you *do not* have control over what the other side is going to do with that HTTP message. Just because you send back a `content-type` of `text/html` with a body of a bunch of parseable HTML does not mean that whoever's on the other end has to make a web page out of it. It could be `curl` and `curl` could just print it off. It could be a browser that has decided it is not going to follow the rules, and it's going to do something else with it entirely. Whatever the case, all you can do is make sure *you* follow the rules, and the rules are what actually make up the *Protocol* in Hyper Text Transfer Protocol. All the browsers have agreed to follow the rules that are laid out in how HTTP messages will work so that when you send back your HTTP message, if you follow the rules, then there's a common understanding of how everything should work. That is how the game works. 
+
+The start line is fairly straightforward, the body is fairly straightforward, but most of the important stuff is located in the headers. The headers are really really important to understand, and they can be rather intimidating since there are so many of them, but generally speaking they're fairly intuitive. 
+
+At the risk of beating it to death, know that on the other end you have something else (a user, a servert, etc.) sending a request to you (doesn't matter who's sending you the request so long as the request is an HTTP request), and HTTP is built on the request sent to your Express server. Express ingests that request, you have your middleware which will do its thing (you'll modify the request object, modify the response object, run a bunch of logic, decide what you're going to do, etc., and all of that is now your responsibility as a developer). In the end, Express will send back a response and remember that this response is only an HTTP message: a start line, headers, and a body. Whoever's on the other side can do whatever they want with the response. If they want to honor your headers, the body, etc., then they can or they don't have to. You have no control over that. What you can do is follow the rules about what's inside your headers so that whoever's on the other end who made the requests knows what they're supposed to do with the data, body, or whatever you sent back. 
+
+Express has made it easier for us in dealing with a lot of common headers by including a lot of header-specific methods on the `request` and `response` objects. We will not be doing stuff with the whole gamut of HTTP headers--the goal is to get some practice, exposure, and confidence in dealing with HTTP headers because you're going to have to interact with them at some point. Maybe not often but definitely occasionally. 
+
+As usual, the MDN [section on HTTP headers](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers) is comprehensive and will be a great reference tool. As MDN notes, headers can typically be grouped into 4 types according to their contexts: 
+
+- [General headers](https://developer.mozilla.org/en-US/docs/Glossary/General_header) apply to both requests and responses, but with no relation to the data transmitted in the body.
+- [Request headers](https://developer.mozilla.org/en-US/docs/Glossary/Request_header) contain more information about the resource to be fetched, or about the client requesting the resource.
+- [Response headers](https://developer.mozilla.org/en-US/docs/Glossary/Response_header) hold additional information about the response, like its location or about the server providing it.
+- [Entity headers](https://developer.mozilla.org/en-US/docs/Glossary/Entity_header) contain information about the body of the resource, like its [content length](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Content-Length) or [MIME type](https://developer.mozilla.org/en-US/docs/Web/HTTP/Basics_of_HTTP/MIME_types).
+
+And headers can also be grouped according to how [proxies](https://developer.mozilla.org/en-US/docs/Glossary/Proxy_server) handle them:
+
+- [Connection](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Connection)
+- [Keep-Alive](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Keep-Alive)
+- [Proxy-Authenticate](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Proxy-Authenticate)
+- [Proxy-Authorization](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Proxy-Authorization)
+- [TE](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/TE)
+- [Trailer](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Trailer)
+- [Transfer-Encoding](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Transfer-Encoding)
+- Upgrade
+
+We'll start by looking at a good example of a general header that applies to both requests and responses and certainly has no relation to the data being transmitted in the body: the data. Using the application generated by the express generator in the previous note, we will execute the following in the terminal after we get our server listening using `nodemon`: `curl -v localhost:3000`. We get the following at this time of writing:
+
+```
+* Rebuilt URL to: localhost:3000/
+*   Trying ::1...
+* TCP_NODELAY set
+* Connected to localhost (::1) port 3000 (#0)
+> GET / HTTP/1.1
+> Host: localhost:3000
+> User-Agent: curl/7.54.0
+> Accept: */*
+> 
+< HTTP/1.1 200 OK
+< X-Powered-By: Express
+< Content-Type: text/html; charset=utf-8
+< Content-Length: 207
+< ETag: W/"cf-sMq3uu/Hzh7Qc54TveG8DxiBA2U"
+< Date: Fri, 17 Apr 2020 19:13:49 GMT
+< Connection: keep-alive
+< 
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Express</title>
+    <link rel='stylesheet' href='/stylesheets/style.css' />
+  </head>
+  <body>
+    <h1>Express</h1>
+    <p>Welcome to Express</p>
+  </body>
+</html>
+* Connection #0 to host localhost left intact
+```
+
+Specifically notice the [Date header](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Date):
+
+```
+< Date: Fri, 17 Apr 2020 19:13:49 GMT
+```
+
+Since we sent a request to the root, let's go into our `index.js` file in `routes` (which handles requests to the root of our domain), and see if we can modify the Date header somehow. 
+
+In general, the quickest and easiest way to change a header in Express is the `res.set`. Of course, `res.get` is its corresponding partner. That is how you *get* the value of a header. Everything else we go over is Express trying to make things easier for us, but `res.set` is how you set headers the fast and obvious way. We could change the header like so for our route handling `GET` requests to the home page (i.e., the root):
+
+```javascript
+/* GET home page. */
+router.get('/', function(req, res, next) {
+  const date = new Date(1969, 6);
+  res.set('Date', date)
+  res.render('index', { title: 'Express' });
+});
+```
+
+And if we send another curl request, then we'll get back
+
+```
+< Date: Tue Jul 01 1969 00:00:00 GMT-0500 (Central Daylight Time)
+```
+
+Clearly the wrong date! But we have the power to change it now. Notice we also have
+
+```
+< Content-Type: text/html; charset=utf-8
+```
+
+If we want to change this header as well, we can do something like `res.set('Content-Type', 'text/plain');` to alter the `Content-Type` header. Note that this will cause the agent receiving our response to interpret the *body* differently because we have now described the body as only consisting of plain text via `text/plain` instead of `text/html` (so it will not be parsed as HTML):
+
+```javascript
+/* GET home page. */
+router.get('/', function(req, res, next) {
+  const date = new Date(1969, 6);
+  res.set('Date', date);
+  res.set('Content-Type', 'text/plain');
+  res.render('index', { title: 'Express' });
+});
+```
+
+Now here's where things get very interesting! If you send another curl request to the root then we will get back
+
+```
+< Content-Type: text/plain; charset=utf-8
+```
+
+as one of the headers which is expected. But if we hop back over to the browser and send a request to the homepage, then nothing changes. It looks the exact same. It still looks like HTML is being interpreted somehow when we just wanted it to be plain text. What's going on here? Welcome to caching! Real quick, here's the opening paragraph to [the Wiki article](https://en.wikipedia.org/wiki/Cache_(computing)) on what a cache is in computing:
+
+**From wiki:** In computing, a cache is a hardware or software component that stores data so that future requests for that data can be served faster; the data stored in a cache might be the result of an earlier computation or a copy of data stored elsewhere. A `cache hit` occurs when the requested data can be found in a cache, while a `cache miss` occurs when it cannot. Cache hits are served by reading data from the cache, which is faster than recomputing a result or reading from a slower data store; thus, the more requests that can be served from the cache, the faster the system performs.
+
+As the next paragraph notes: To be cost-effective and to enable efficient use of data, caches must be relatively small. Nevertheless, caches have proven themselves in many areas of computing [...]. 
+
+Cool! Well, does Chrome use caching? Of course it does. So us not seeing a change in the page view (of the homepage) despite our manual change of a header (the `Content-Type` header) is really just the browser trying to do its job. Chrome is caching our page. In order to break this for the moment, you will need to `Inspect` (get to the dev tools) and then right-click on the refresh will and click "Empty Cache and Hard Reload". This will clear the headers out. The browser is preserving the old headers assuming they haven't changed because why would the `Content-Type` of the home page change? How often does that happen? Well, in development, it happens all the time, but in the real world it almost never happens. 
+
+So now we actually get the plain text we expected! We now have the power to change the headers to whatever we want. 
+
+If we look at the [general header](https://developer.mozilla.org/en-US/docs/Glossary/General_header) article on MDN, we will see that the most common general headers are [Date](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Date), [Cache-Control](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Cache-Control), and [Connection](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Connection). We already discussed `Date`, but `Cache-Control` is going to be our homerun. This is where we will spend the most time as an example. And then we will pass briefly over the other things Express does with headers. Remember, the goal is to just get some practice, exposure, and confidence in dealing with headers. Then we can roam freely. 
+
+Before delving into [Cache-Control](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Cache-Control), let's briefly review what caching is all about. If you go to a website and you load it up, then you go through the whole request-response cycle process from beginning to end and you (hopefully) end up with the data you were requesting. If, say 5 minutes later, you come back to the website you just got data from a moment ago and load up the exact same page, if nothing has changed, then there's no reason for you to bog down your computer and the server and the network with everything that goes into that request-response cycle. Of course, your own computer is probably quite fast, and the Internet is also very fast. So would it really make a difference? Probably not. But high-octane sites like google.com and facebook.com are trying to shave the slightest nanosecond off of anything that they can because it might save them millions of dollars. Allegedly, Google once deminified their homepage so there were return carriages, spaces, and so on in the actual HTML, and it cost them 7 or 8 figures just from that tiny little change. So caching is incredibly important, but it's also one of those topics that's incredibly complicated so as a junior or mid-level developer you probably won't have a lot of control over it, but it is very very important and Express gives us a few options to deal with it.
+
+As the MDN article notes, `Cache-Control` is a general header and caching directives are unidirectional. So just because `Cache-Control` may be set going one way, it does not mean it will be set the same way when coming back from another direction (i.e., `Cache-Control` for request may be different from `Cache-Control` for response and vice-versa). The caching directives are case-insensitive and there are different cache directives based on whether or not you are dealing with the request or the response (meaning `Cache-Control` will `always` be the `key` but what you are allowed to use as the directive or "value" for this key depends on whether or not you are dealing with a request or response.
+
+For example, as MDN notes, standard `Cache-Control` directives that can be used by the client in an HTTP request are as follows:
+
+```bash
+Cache-Control: max-age=<seconds>
+Cache-Control: max-stale[=<seconds>]
+Cache-Control: min-fresh=<seconds>
+Cache-Control: no-cache 
+Cache-Control: no-store
+Cache-Control: no-transform
+Cache-Control: only-if-cached
+```
+
+And standard `Cache-Control` directives that can be used by the server in an HTTP response:
+
+```
+Cache-Control: must-revalidate
+Cache-Control: no-cache
+Cache-Control: no-store
+Cache-Control: no-transform
+Cache-Control: public
+Cache-Control: private
+Cache-Control: proxy-revalidate
+Cache-Control: max-age=<seconds>
+Cache-Control: s-maxage=<seconds>
+```
+
+The `max-age` directive is the requestor saying, "I will use a cached resource for this long and only this long." To understand `max-stale`, let's issue a curl request to Google: `curl -v google.com`. You will see something like the following as one of the response headers:
+
+```
+< Expires: Sun, 17 May 2020 19:54:19 GMT
+```
+
+So, once we pass the above date (whatever date is on the `Expires` header if there is one), the response is considered stale. If the client is willing to accept something that is stale, then `max-stale[=<seconds>]` indicates how far past stale (in seconds) the requestor is willing to go. So, for example, the requestor could say, "I'll accept a stale resource (web page, JSON, image, whatever) for a few seconds, an hour, or a day." If you're really excited about the caching stuff, you can check out [the detailed protocol](https://www.w3.org/Protocols/rfc2616/rfc2616-sec13.html) on W3. `min-fresh=<seconds>` would be, "It has to be at least this fresh." `no-cache` means the requestor is going to expect some kind of validation to make sure that it doesn't want to use a cache unless there's absolutely no reason for it to get a new response. `no-store` means the requestor will not store anything about the response. It will not keep any data--this is not efficient and we'll look at it in just a moment. If you look further down the MDN page, they have a brief paragraph about each directive. 
+
+On the part of the response, it has `must-revalidate` which is just what it says and it also has `no-cache` and `no-store` directives. There are also `public` and `private` directives. So think about how you are on the other side now. You are the server. And if you have a file that is a bunch of Node.js and it's *always* the same (say like a template file built with EJS), and instead of compiling that EJS every single time, if it's pretty much always the same, then why wouldn't you just run it one time, cache the resulting HTML, CSS, and JavaScript, and then send that cache every single time? Problem solved! Now you don't have to do all of the extra work every single time. Well, sometimes you are going to have private stuff. You will have stuff in the response that is unique to that user, and you can specify that as `private`, meaning, "I can cache this for this user, but I can't use this copy for everybody else (that is what `public` would be fore)." There's also a `max-age=<seconds>` and `s-maxage=<seconds>`. 
+
+Let's return to the `no-store` directive real quick, which we can apply as a `Cache-Control` directive for either request or response. If we go back to our `index.js` and again change `res.set('Content-Type', 'text/plain');` to `res.set('Content-Type', 'text/html');` and reload, then nothing will happen (because the browser is still caching our page by default). But if we include `res.set('Cache-Control', 'no-store');` as well (and then clear cache and hard reset to clear the headers out and reload), then we can freely change back and forth between `res.set('Content-Type', 'text/plain');` and `res.set('Content-Type', 'text/html');` and see the change immediately reflected because there is no cached copy of our page to even use anymore. This is good for development and only for development! But this can be a really really nice thing when you're working on a project and you can't figure out why you're constantly fighting the cache. You can simply set it to `no-store` and it will tell the browser through the `Cache-Control` header that it does not want it to store anything. Of course, we used the `no-store` directive on the `response` object because we're in charge of the response--we're not actually initiating the request (the browser is). 
+
+Two other directives we can quickly get out of the way are `fresh` and `stale`, and these belong to the `request` object, meaning the requestor is letting you know how old a thing is. The Express docs [on req.fresh](https://expressjs.com/en/4x/api.html#req.fresh) and [req.stale](https://expressjs.com/en/4x/api.html#req.stale)` say it best:
+
+**req.fresh:** When the response is still “fresh” in the client’s cache, `true` is returned, otherwise `false` is returned to indicate that the client cache is now stale and the full response should be sent. When a client sends the `Cache-Control: no-cache` request header to indicate an end-to-end reload request, this module will return `false` to make handling these requests transparent. Further details for how cache validation works can be found in the [HTTP/1.1 Caching Specification](https://tools.ietf.org/html/rfc7234). Example use case:
+
+```javascript
+console.dir(req.fresh)
+// => true
+```
+
+**req.stale:** Indicates whether the request is “stale,” and is the opposite of `req.fresh` (so we should have `req.stale = !req.fresh`). For more information, see [req.fresh](https://expressjs.com/en/4x/api.html#req.fresh). Example use case:
+
+```javascript
+console.dir(req.stale)
+// => true
+```
+
+Since `req.fresh` and `req.stale` are booleans, you could run different logic based on the cache by utilizing these different booleans. 
+
+This finishes up the meaty portion concerning HTTP headers. The rest touched on below will be just a brief accounting for.
+
+- [req.ips](https://expressjs.com/en/4x/api.html#req.ips): There is a header called `x-Forwarded-For`, and this is used whenever someone is behind a proxy to be able to find them. That is, if someone is behind a router or someone is behind a load balancing server or something like that, that means that you as the server will not be able to see their real IP address. You'll see the IP address of their proxy, and then the proxy will get them to their actual IP address. The router can send the `x-Forwarded-For`, which is the actual IP address of that client machine. `req.ips` will contain an array with all of those IPs. If we look at `[app.set()](https://expressjs.com/en/4x/api.html#app.set)`, which contains the settings table for our Express application, then you can see that `trust proxy` property is set to `false` (disabled) by default and even includes a note for our benefit: NOTE: `X-Forwarded-*` headers are easily spoofed and the detected IP addresses are unreliable. So you would only modify `trust proxy` if you really knew what you were doing with it and wanted to modify its behavior. 
+- [req.xhr](https://expressjs.com/en/4x/api.html#req.xhr): This is a boolean property that will be set to true if the `X-Requested-With` header is an XMLHttpRequest. Essentially what that means is: "Is this an AJAX request? Did axios, jQuery, a front-end site, or generally some library client make an AJAX request to the server? Again, you can't always trust this because `X-Requested-With` can be spoofed, but it's the general way to accomplish that.
+- [req.accepts(types)](https://expressjs.com/en/4x/api.html#req.accepts): You pass it a string and that string will be a `Content-Type` (e.g., `html`, `json`, `application/json` etc.), and if that content type is accepted by the requestor it will be returned. There is an `Accept` HTTP header field, and we can see this if we use `curl -v google.com` again. So in our request, sent by curl, we'll see `> Accept: */*` as one of the headers. Essentially what this means is that we're willing to accept anything. Text, image, json, etc. We don't care. We'll accept anything. But if we want to send back HTML and we're not sure if the requestor is accepting HTML, then we can check by executing `req.accepts(html)` to make sure. This will either respond with `'html'` to indicate a confirmation/validation or it will return `false`. We can test some of this out using Postman (such a valuable tool!). We can send a `GET` request to `http://localhost:3000` and specify the request headers before sending the request. Often we have `Accepts: */*` meaning we'll accept anything as noted above, but this time we can change it to `Accepts: application/json` and then modify our `index.js` homepage route handler for `GET` requests like so:
+
+```javascript
+/* GET home page. */
+router.get('/', function(req, res, next) {
+  const date = new Date(1969, 6);
+  console.log(req.accepts('html'));               // false
+  console.log(req.accepts('application/json'));   // application/json
+  res.set('Date', date);
+  res.set('Content-Type', 'text/html');
+  res.set('Cache-Control', 'no-store');
+  res.render('index', { title: 'Express' });
+});
+```
+
+We can also pass `req.accepts` an array of content types we want to test to see if they're accepting any of them. And as [the docs](https://expressjs.com/en/4x/api.html#req.accepts) note, if we pass a list or array, then the `req.accepts` method returns the *best* match (if any).
+
+So this is how `req.accepts` works. There's also the following:
+
+- [req.acceptsCharsets(charset [, ...])](https://expressjs.com/en/4x/api.html#req.acceptsCharsets): Returns the first accepted charset of the specified character sets, based on the request’s `Accept-Charset` HTTP header field. If none of the specified charsets is accepted, returns `false`.
+- [req.acceptsEncodings(encoding [, ...])](https://expressjs.com/en/4x/api.html#req.acceptsEncodings): Returns the first accepted encoding of the specified encodings, based on the request’s `Accept-Encoding` HTTP header field. If none of the specified encodings is accepted, returns `false`.
+- [req.acceptsLanguages(lang [, ...])](https://expressjs.com/en/4x/api.html#req.acceptsLanguages): Returns the first accepted language of the specified languages, based on the request’s `Accept-Language` HTTP header field. If none of the specified languages is accepted, returns `false`.
+
+For all of these, we are told to visit [accepts](https://github.com/jshttp/accepts) for more information (or if we have issues or concerns when using any of the above three methods on the request object). 
+
+The point is that all three of the methods above do as they say. For example, we can check if `utf-8` is being accepted or English as a language, etc. 
+
+- [req.get(field)](https://expressjs.com/en/4x/api.html#req.get): Returns the specified HTTP request header field (case-insensitive match). The `Referrer` and `Referer` fields are interchangeable. If a header is undefined, then you will simply get back `undefined`. Otherwise you will get the value (e.g., `req.get('Content-Type')` might give you `text/plain` or something like that). This is basically the counterpart/partner of `req.set`. 
+- [req.range(size[, options])](https://expressjs.com/en/4x/api.html#req.range): This will parse out the `Range` header. And `Range` is a little bit tricky because what you're doing is asking for maybe portions of the document and it will usually be in bytes, but you can read through the docs and `req.range` will try to do the heavy lifting for the parsing if you want to do that. 
+
+We can also check out some of the properties on the response object related to HTTP headers:
+
+- [res.append(field [, value])](https://expressjs.com/en/4x/api.html#res.append): Appends the specified `value` to the HTTP response header `field`. You just want to add something to a given `field`. For example, previously we looked at something like `req.accepts('application/json')`. But maybe later we wanted to check to see if the requestor is accepting `html` and we didn't want to redefine anything or manipulate `req.accepts('application/json')`--we could do `res.append(accepts, 'html')`. A very common one is for when `Link` is the field (where its values always come in an array). So basically `res.append` is ultimately for headers (i.e., `field`s) that have array-like `value`s and you want to add something on to it.
+- [res.format(object)](https://expressjs.com/en/4x/api.html#res.format): This is kind of cool but probably use-case specific in terms of whether or not you will find it to be of any use. Basically, it uses `req.accepts` to find out what type of content the request is willing to accept and then you can run a specific callback based on this almost like a `switch` statement:
+
+```javascript
+res.format({
+  'text/plain': function () {
+    res.send('hey')
+  },
+
+  'text/html': function () {
+    res.send('<p>hey</p>')
+  },
+
+  'application/json': function () {
+    res.send({ message: 'hey' })
+  },
+
+  default: function () {
+    // log the request and respond with 406
+    res.status(406).send('Not Acceptable')
+  }
+})
+```
+
+So if the user is accepting `text/plain` run the given function, etc. Basically, as the docs note, `res.format` performs content-negotiation on the `Accept` HTTP header on the request object, when present. This is pretty cool but not all that commonly used.
+
+- [res.get(field)](https://expressjs.com/en/4x/api.html#res.get): Just like `req.get(field)`, `res.get(field)` will return the value of any response header. So you could do something like `res.get('Content-Type')` if you need to know what the `Content-Type` is at a given point in the request-response cycle, and that can be really handy in a piece of middleware. If you don't know what the final response is going to send back, then you can grab the header, and it can be really helpful.
+- [res.links(links)](https://expressjs.com/en/4x/api.html#res.links): This is just a really fast way of making the `Link` header. This joins the `links` provided as properties of the parameter to populate the response's `Link` HTTP header field. For example, the call
+
+```javascript
+res.links({
+  next: 'http://api.example.com/users?page=2',
+  last: 'http://api.example.com/users?page=5'
+})
+```
+
+yields the following results:
+
+```
+Link: <http://api.example.com/users?page=2>; rel="next",
+      <http://api.example.com/users?page=5>; rel="last"
+```
+
+Usage of the `Links` header is common for APIs that limit "page size" for how many things can be fetched at once. For example, [this Game of Thrones API](https://anapioficeandfire.com/Documentation) sends back a `Link` header to indicate the `pageSize` requested, what the next page could be, what the last one would be, etc.
+
+- [res.location(path)](https://expressjs.com/en/4x/api.html#res.location): This sets the response `Location` header to the specified `path` parameter. So if you use `res.redirect([status,] path)` for a redirection, then you could simply pass `res.location(path)` as the `path` variable in `res.redirect` and write the `Location` header also while provided the desired `path` destination for the redirect. 
+- [res.sendStatus(statusCode)](https://expressjs.com/en/4x/api.html#res.sendStatus): Sets the response HTTP status code to `statusCode` and send its string representation as the response body. Express is already going to write this stuff for you, but if you wanted to do it yourself for some reason, then you have that power. 
+
+```javascript
+res.sendStatus(200) // equivalent to res.status(200).send('OK')
+res.sendStatus(403) // equivalent to res.status(403).send('Forbidden')
+res.sendStatus(404) // equivalent to res.status(404).send('Not Found')
+res.sendStatus(500) // equivalent to res.status(500).send('Internal Server Error')
+```
+
+- [res.status(code)](https://expressjs.com/en/4x/api.html#res.status): Sets the HTTP status for the response but does *not* send the status code's string representation as the response body as is the case with `res.sendStatus(code)`. Note the examples below how we set the HTTP status for the response but we end up sending something other than the string representation for the status code back as the response. 
+
+```javascript
+res.status(403).end()
+res.status(400).send('Bad Request')
+res.status(404).sendFile('/absolute/path/to/404.png')
+```
+
+- [res.type(type)](https://expressjs.com/en/4x/api.html#res.type): This will explicitly set `Content-Type` HTTP header to the MIME type as determined by [mime.lookup()](https://github.com/broofa/node-mime#mimelookuppath) for the specified `type`. Essentially it is a quicker way of writing `res.set('Content-Type', type)` (with all of the included benefits of `mime.lookup()` as well), and presumably `res.type` is provided because setting the `Content-Type` is such a common thing to do:
+
+```javascript
+res.type('.html')
+// => 'text/html'
+res.type('html')
+// => 'text/html'
+res.type('json')
+// => 'application/json'
+res.type('application/json')
+// => 'application/json'
+res.type('png')
+// => 'image/png'
+```
+
+- [res.vary(field)](https://expressjs.com/en/4x/api.html#res.vary): Adds the field to the `Vary` response header if it is not there already (this has to do with the cache):
+
+```javascript
+res.vary('User-Agent').render('docs')
+```
+
+Phew! Brief introduction to headers but that's the gist. Most of this is stuff you are never going to have to deal with, but the point is that now you are enlightened and should not be afraid to deal with it if needed. If you do somehow find yourself needing to deal with headers, then `res.set` is your best friend and what you will use most often in Express land. Remember: You *do not* send back web pages, JSON, or anything like that. You send back HTTP messages. And what to do with the HTTP message, whether you're the requestor or the responder, is always going to be determined by what's in the headers. 
+
+---
+
+</details>
+
+## Movie Fan App
+
+<details open><summary> <strong>Project setup</strong></summary>
+
+TBD
+
+---
+
+</details>
+
 
 
 ## Course Questions to Follow Up On
