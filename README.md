@@ -5042,7 +5042,7 @@ Both servers are part of the same system (e.g., GitHub, Facebook, Google, or who
 
 </details>
 
-<details open><summary> <strong>Passport and the GitHub strategy</strong></summary>
+<details><summary> <strong>Passport and the GitHub strategy</strong></summary>
 
 There are a bunch of little things needed in order to make Passport work properly. We'll handle each piece in turn and just deal with the errors as they crop up. In [the docs](http://www.passportjs.org/docs/authenticate/) we can head to the Authenticate section and we'll start there. The first thing we should do is copy over the contents from our previous `movieFanApp`:
 
@@ -5412,13 +5412,278 @@ After authenticating, we can click on different movies, search, and so forth. Bu
 
 </details>
 
+## Multer: Uploading files to Express
 
+<details><summary> <strong>Express view to Express Route</strong></summary>
 
+We are now going to look at [the multer module](https://www.npmjs.com/package/multer) whose job is to allow you to upload files (so maybe you have a file input box ... sending up a file is a lot different than sending up text or JSON or something like that). As the start of the docs state: "Multer is a node.js middleware for handling `multipart/form-data`, which is primarily used for uploading files. It is written on top of [busboy](https://github.com/mscdex/busboy) for maximum efficiency. Multer will not process any form which is not multipart (`multipart/form-data`)."
 
+So "multer" is coming from "multipart." As the docs also note: "Don't forget the `enctype="multipart/form-data"` in your form." So if you want to use the multer module, then you will absolutely have to use `enctype="multipart/form-data"` on whatever form you are using to submit your files. We can check this out more by visiting [the Mozilla docs](https://developer.mozilla.org/en-US/docs/Web/HTML/Element/form) on `form` and scrolling down to `enctype` in the Attribues section 
 
+Mozille notes the following for `enctype`: If the value of the `method` attribute is `post`, `enctype` is the [MIME type](https://en.wikipedia.org/wiki/Media_type) of the form submission. Possible values: 
 
+- `application/x-www-form-urlencoded`: The default value.
+- `multipart/form-data`: Use this if the form contains [<input>](https://developer.mozilla.org/en-US/docs/Web/HTML/Element/input) elements with `type=file`.
+- `text/plain`: Introduced by HTML5 for debugging purposes.
 
+So first of all we have to have a `post` request. You wouldn't use another form method for trying to *upload* files. As we have seen before, the default is `application/x-www-form-urlencoded`, which is basically urlencoded JSON. But `multipart/form-data` is going to be what we need for the `enctype` if we  have an `input` with `type="file"`. That is exactly where we are headed. We want to upload an actual file like a picture, an image, a video, an audio file, etc. Those are files and those cannot come through as `application/x-www-form-urlencoded`. 
 
-## Course Questions to Follow Up On
+We can get rid of the boilerplate code for our `index` view and go ahead and create a basic form:
 
-- TBD
+```HTML
+<!DOCTYPE html>
+<html>
+  <head>
+    <title><%= title %></title>
+    <link rel='stylesheet' href='/stylesheets/style.css' />
+  </head>
+  <body>
+    <form method="post" action="/formsub" enctype="multipart/form-data">
+      <input type="text" placeholder="filename">
+      <input type="file">
+    </form>
+  </body>
+</html>
+```
+
+Again, if we *must* have `enctype="multipart/form-data"` on our form in order to be able to upload a file. The dialog you get for such a form for file submission (i.e., "Choose File" in some browsers) is set by the browser and notoriously difficult to style. If you click the "Choose File" button, then the browser is going to interact with your computer (e.g., via Finder or something like that). 
+
+Right now if we set up a simple route like
+
+```javascript
+router.post('/formsub', (req, res, next) => {
+  res.json(req.body)
+})
+```
+
+and choose a file and submit the form, then we will get back an empty object as the JSON response. Why? What gives? We posted some data--where is it? Well, the `body-parser` is not meant to work with the particular `enctype` of `multipart/form-data`. We need multer to do it (or do something ourselves which is not advised). If we hop back to [the docs](https://www.npmjs.com/package/multer#usage) for multer, we can see an example of its usage. We first need multer (i.e., `const multer = require('multer');`), and then there's an example given that looks informative:
+
+```javascript
+var upload = multer({ dest: 'uploads/' })
+```
+
+So we will invoke `multer` at some point just as we did `express` (with express we invoked `express()` and assigned the value to `app` whereas here we are invoking `multer` with certain options and assigning the value to upload)--the point is that the `multer` module returns a function (like the express module returns the `createApplication` function). For the above example, we invoke the `multer` function and we tell it where we want to upload our folder. It's probably easiest if we reproduce the example code in the docs to refer back to:
+
+```javascript
+var express = require('express')
+var multer  = require('multer')
+var upload = multer({ dest: 'uploads/' })
+ 
+var app = express()
+ 
+app.post('/profile', upload.single('avatar'), function (req, res, next) {
+  // req.file is the `avatar` file
+  // req.body will hold the text fields, if there were any
+})
+ 
+app.post('/photos/upload', upload.array('photos', 12), function (req, res, next) {
+  // req.files is array of `photos` files
+  // req.body will contain the text fields, if there were any
+})
+ 
+var cpUpload = upload.fields([{ name: 'avatar', maxCount: 1 }, { name: 'gallery', maxCount: 8 }])
+app.post('/cool-profile', cpUpload, function (req, res, next) {
+  // req.files is an object (String -> Array) where fieldname is the key, and the value is array of files
+  //
+  // e.g.
+  //  req.files['avatar'][0] -> File
+  //  req.files['gallery'] -> Array
+  //
+  // req.body will contain the text fields, if there were any
+})
+```
+
+In our `index.js` route, we are going to declare the following:
+
+```javascript
+const upload = multer({ dest: 'public/images/uploads' });
+```
+
+We are going to choose `public` here because we want anyone to be able to view this. Of course, if you don't want the uploaded image to be served publicly, then don't put it there, but it will be an easy way to test it out. So any file that multer processes will end up there. Right now we have an `images` folder in `public` already but not an `uploads` one. So take note of that. In the example code snippet from the docs above, take a look at the first route handler:
+
+```javascript
+app.post('/profile', upload.single('avatar'), function (req, res, next) {
+  // req.file is the `avatar` file
+  // req.body will hold the text fields, if there were any
+})
+```
+
+As we can tell (hopefully), `upload.single('avatar')` is a piece of middleware. In particular, it is the first piece of the middleware stack on the route that handles `POST` requests to `/profile`. So this is just regular middleware that we don't have to actually look at. And from the example we see several method choices for `upload`, namely `single`, `array`, `fields`, and two others not mentioned right there (i.e., `none` and `any`). What multer is trying to do is communicate and enforce that they don't trust the scary internet. The last thing we want to do is open up our server or our Express site to potental security risks. We are going to limit the fields that they can upload to whatever we say. So for something like `upload.single('avatar')`, we are effectively saying, "We are accepting one file and it *must* have the `name` `avatar`." This prevents people from spamming your site with, say, 4k videos that crash your hard drive and your database goes down, etc. So `upload.single('avatar')` means I will only accept a single field with `type="file"` and whose `name` attribute on the `input` is `avatar`. 
+
+So our form may look like the following now:
+
+``` HTML
+<form method="post" action="formsub" enctype="multipart/form-data">
+  <input type="text" placeholder="filename" name="desc">
+  <input type="file" name="meme">
+  <input type="submit" value="submit">
+</form>
+```
+
+Now, if we submit the form with "programming" as the input text and choose the file to submit, then we will get the following JSON back since we are doing a `res.json(req.body)` in our `index` route:
+
+```javascript
+{
+  "desc": "programming"
+}
+```
+
+As [the docs](https://www.npmjs.com/package/multer#singlefieldname) note for `.single(fieldname)`, this accepts a single file with the name `fieldname`, and the single file will be stored in `req.file`. So the file is not stored on `req.body` but `req.file`. So instead of just doing `res.json` with `req.body` let's do this:
+
+```javascript
+router.post('/formsub', upload.single('meme'), (req, res, next) => {
+  res.json({
+    field: req.body,
+    image: req.file
+  })
+})
+```
+
+Then we will get back something more informative:
+
+```JSON
+{
+  "field": {
+    "desc": "programming"
+  },
+  "image": {
+    "fieldname": "meme",
+    "originalname": "myProgramming.png",
+    "encoding": "7bit",
+    "mimetype": "image/png",
+    "destination": "public/images/uploads",
+    "filename": "2eb902fec95e2e869efd34c073c84858",
+    "path": "public/images/uploads/2eb902fec95e2e869efd34c073c84858",
+    "size": 517353
+  }
+}
+```
+
+So we have a lot of information coming in about the submitted image now. And we can also check inside of the `images` folder in `public` and see that an `uploads` folder has been created and it contains the uploaded image as what may look like rubbish for right now (they're not `.png`s or something else so they are not displaying right now). Something happened at least! Which is a good sign. The next step is going to be making that file into something that is actually openable. Now, there's any number of ways you can go about doing this. You can choose to read the file in and check it over and then you can write the file or what we can do for right now is just rename the file. 
+
+Of course, to do things with files in Node we will want to use the `fs` module. We will specifically use [fs.rename](https://nodejs.org/api/fs.html#fs_fs_rename_oldpath_newpath_callback) or `fs.rename(oldPath, newPath, callback)`. The `oldPath` is going to be `req.file.path` (i.e., what the path of the file is by the time it gets to our `fs.rename` function--this will be available as soon as the form is submitted and the data has been posted), the `newPath` will be the place we *want* to put the file (typically, you will want this to be dynamic, such as attaching a timestamp, so you don't risk overwriting files--for example, many users may use `profile.png` as their profile picture), and then a `callback` to run once the file has been renamed.
+
+The following is one way you could then structure the route using `fs.rename`:
+
+```javascript
+router.post('/formsub', upload.single('meme'), (req, res, next) => {
+  console.log(req.file);
+  let {desc: desiredFileName} = req.body; // get what the user named the file on input
+  let {originalname: actualFileName} = req.file; // rename actual name of file submitted as actualFileName
+  let newFileName = encodeURIComponent(desiredFileName + Date.now() + actualFileName.slice(actualFileName.lastIndexOf('.'))); // in case user tries any funny business with file name submission
+  const newPath = `public/images/uploads/${newFileName}`
+  fs.rename(req.file.path, newPath, (err) => {
+    if (err) throw err;
+    // upload newPath to the database
+    res.json({msg: 'file uploaded successfully'})
+  });
+})
+```
+
+If you run this now after submitting a file, then you will see that we no longer get a bunch of gibberish but the actual file renamed and with a dynamic date set as well. The [encodeURIComponent()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/encodeURIComponent) part could come in handy depending on what the user is trying to submit in terms of naming (spaces or things like that could cause issues). We can imagine somewhere in our application the user wanting to see the image they uploaded so we may actually want the new file name to be part of a URL or a component of a URL. [Here](https://stackoverflow.com/q/4540753/5209533) is a good discussion of all of this. Also, while above we try to respect the file type (i.e., extension) of what the user gives us, often you will want to mandate what kind of file extensions you expect to get so a user cannot, say, submit a `.txt` file when a `.png` is expected.
+
+The above covers the `single` use case for uploading files, but there's also the case when we want to upload [multiple](https://www.npmjs.com/package/multer#arrayfieldname-maxcount) files using `upload.array(fieldname[, maxCount])`: Accept an array of files, all with the name `fieldname`. Optionally error out if more than `maxCount` files are uploaded. The array of files will be stored in `req.files`. To test this out, we could make a new form:
+
+``` HTML
+<form method="post" action="/formsubarray" enctype="multipart/form-data">
+  <label for="profile_picture">Profile Picture: <input type="file" id="profile_picture" name="meme" value="profile_picture"></label><br>
+  <label for="album_cover">Album Cover: <input type="file" id="album_cover" name="meme"></label><br>
+  <label for="personal_art">Personal Art: <input type="file" id="personal_art" name="meme"></label>
+  <input type="submit" value="submit">
+</form>
+```
+
+And we can include the following route:
+
+```javascript
+router.post('/formsubarray', upload.array('meme'), (req, res, next) => {
+  console.log(req.files)
+  req.files.forEach( async (file) => {
+    let {originalname: actualFileName} = file;
+    let newFileName = encodeURIComponent(actualFileName + Date.now() + actualFileName.slice(actualFileName.lastIndexOf('.')));
+    const newPath = `public/images/uploads/${newFileName}`
+    await fs.rename(file.path, newPath, (err) => {
+      if (err) throw err;
+      // upload newPath to the database
+    });
+  })
+  res.json({msg: 'files uploaded successfully!'})
+})
+```
+
+Another thing to do would be to specify individual fields so everything would be easier to manage. But this covers the basic use cases for now.
+
+---
+
+</details>
+
+<details><summary> <strong>React to Express</strong></summary>
+
+The main trick in React is making sure you properly set the header when making your `POST` request from your form: `'content-type': 'multipart/form-data'`. There's also use of [FormData](https://developer.mozilla.org/en-US/docs/Web/API/FormData). 
+
+Essentially what we will have (without all the fluff) will look as follows:
+
+```javascript
+import React, { Component } from 'react';
+import axios from 'axios';
+
+class FileForm extends Component {
+
+  handleSubmit = async (e) => {
+    e.preventDefault();
+    // console.log("Form Submitted");
+    // normally for a text field you would use .value
+    // but input boxes that are files do not have a value property
+    // they have a files property
+    // and the files property will be an array for every file that is submitted with the form
+    const file = document.getElementById('file-field').files[0];
+    const file2 = document.getElementById('file-field').files[0];
+    // console.log(file)
+    const url = 'http://localhost:3000/uploadFiles';
+    const config = {
+      headers: {
+        'content-type': 'multipart/form-data'
+      }
+    }
+
+    const data = new FormData();
+    data.append('meme', file);
+    data.append('meme', file2);
+    // console.log(data); // <-- doesn't actually log anything to the console
+    // for (let pair of data.entries()) {  // <-- use this instead to log to the console
+    //   console.log(pair[0])
+    //   console.log(pair[1])
+    // }
+
+    let ourData = await axios.post(url, data, config);
+    console.log(ourData.data);
+  }
+
+  render() {
+    return (
+      <div>
+        <h1>Sanity Check</h1>
+        <form onSubmit={this.handleSubmit}>
+          <input id="file-field" type="file" name="meme" />
+          <input id="file-field2" type="file" name="meme" />
+          <input type="submit" name="submit" />
+        </form>
+      </div>
+    )
+  }
+}
+
+export default FileForm;
+```
+
+---
+
+</details>
+
+<details><summary> <strong>Express to S3</strong></summary>
+
+Best left for reference to watch. Great programmatic way of going about being able to upload submitted files to an S3 bucket so you can offload the strain of hosting data onto AWS.
+
+---
+
+</details>

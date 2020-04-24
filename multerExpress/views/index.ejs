@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title><%= title %></title>
+    <link rel='stylesheet' href='/stylesheets/style.css' />
+  </head>
+  <body>
+    <form method="post" action="/formsub" enctype="multipart/form-data">
+      <input type="text" placeholder="filename" name="desc">
+      <input type="file" name="meme">
+      <input type="submit" value="submit">
+    </form>
+    <p>Separator buddy!</p>
+    <form method="post" action="/formsubarray" enctype="multipart/form-data">
+      <label for="profile_picture">Profile Picture: <input type="file" id="profile_picture" name="meme" value="profile_picture"></label><br>
+      <label for="album_cover">Album Cover: <input type="file" id="album_cover" name="meme"></label><br>
+      <label for="personal_art">Personal Art: <input type="file" id="personal_art" name="meme"></label>
+      <input type="submit" value="submit">
+    </form>
+
+  </body>
+</html>
