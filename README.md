@@ -4361,7 +4361,7 @@ Phew! Brief introduction to headers but that's the gist. Most of this is stuff y
 
 ## Movie Fan App
 
-<details open><summary> <strong>Project setup</strong></summary>
+<details><summary> <strong>Project setup</strong></summary>
 
 TBD
 
@@ -4369,9 +4369,619 @@ TBD
 
 </details>
 
+## Building an API
+
+<details><summary> <strong>Project setup: the goal, express generator, and data dump</strong></summary>
+
+We're going to scaffold out a new project similar to the previous one except this time we are on the *other* side; that is, instead of *requesting* data from an API to use in an application by making different requests and so forth, we will actually *response* with data as if a user is asking *us* to be their API. They should be able to hit different routes, and we should respond with the expected data. 
+
+Since this is a "Just Express" course, we will not add a database layer on top of things but instead siphon off some data from [The Movie Database API](https://developers.themoviedb.org/3/getting-started/introduction). The "data" we will deal with may be found [here](https://github.com/daniel-farlow/just-express/tree/master/udemy-course-files/starterFiles/apiProject2).
+
+We will run the express generator to generate the basic scaffold for our project:
+
+``` BASH
+npx express-generator --no-view movieFanAPI
+```
+
+Note we *do not* need a view engine (unless you want one for the built-in error handling that the generator gives us) since we will not be responding with views but with data. Once you have run the generator, `cd` in the project directory and always remember to wear your helmet: `npm i helmet`. Then simply do `npm i` to install all of the express dependencies. 
+
+Then create a `data` folder at the root level in the project directory and copy the [files mentioned above](https://github.com/daniel-farlow/just-express/tree/master/udemy-course-files/starterFiles/apiProject2) into this folder. Again, we do not have a database to work with here. It's not uncommon to have a `data` directory, but it would be far more common to be pulling the data out of a database (a SQL or NoSQL database like MySQL/PostgreSQL or MongoDB, respectively) rather than using a huge, static chunk of JSON. 
+
+---
+
+</details>
+
+<details><summary> <strong>Project structure and routes</strong></summary>
+
+The basic file structure for our application has been given to us from the express generator, but we want to specifically think through the routes because that is the bulk of the API. We are going to create endpoints for somebody else to come in and hit. Of course, the express generator starts us off with an `indexRouter` and `usersRouter` for `/` and `/users`, respectively. What do we actually need in this project though? 
+
+In our other project, we largely went to just two routes:
+
+- `/movies/...`
+- `/search/...`
+- `/now_playing/...`
+
+We can look at [the API docs](https://developers.themoviedb.org/3/movies/get-movie-details) for the movie database we used previously and see how they have structured getting movie detaisl: `/movie/{movie_id}`. Under [the movies tab](https://developers.themoviedb.org/3/movies) you'll see all sorts of ways for `GET`ting data as well as a way to [`POST` a movie rating](https://developers.themoviedb.org/3/movies/rate-movie) and a way to [`DELETE` a movie rating](https://developers.themoviedb.org/3/movies/delete-movie-rating). We're not going to be able to do anything with these since we don't have a database, but we're going to include them anyway. What we're looking at so far: 
+
+- `GET` movie details: `/movie/{movie_id}`
+- `POST` movie rating: `/movie/{movie_id}/rating`
+- `DELETE` movie rating: `/movie/{movie_id}/rating`
+
+The point here is that `/movie` is definitely a good candidate for us as far as routes are concerned. And for `/search` let's see [what the possibilities are](https://developers.themoviedb.org/3/search/search-companies). [We have](https://developers.themoviedb.org/3/search/search-movies) a `/search/movie` one and [another](https://developers.themoviedb.org/3/search/search-people) `/search/person`. These both seem like good candidates for making a `/search` route.
+
+If you look at the sidebar for their API docs, you'll see everything really organized into routes. For example, everything under the [TV](https://developers.themoviedb.org/3/tv/get-tv-details) heading starts with `/tv` whether it's to get content ratings (i.e., `/tv/{tv_id}/content_ratings`) or to get keywords for a movie (i.e., `/tv/{tv_id}/keyword`) or a whole host of other things about TV all on the `/tv` route. Similar things will play out for the `/movies`, `/search`, `/discover`, etc., routes. Think about how all the data relates and structure things accordingly. What kind of data do you want to serve up based on endpoints that are hit? 
+
+All that said, we can get rid of the `usersRouter` and everything associated with it. And we want to add a `movieRouter` and a `searchRouter` (via `movie.js` and `search.js` in the `routes` folder). And for `now_playing` we'll simply use the `indexRouter` for that so someone can go to `/now_playing` and get the data they want and expect.
+
+Remember that using middleware such as `app.use('/movie', movieRouter)` means that *all* of the routes in our `movieRouter` behave as if `/movie` were prepended to them. That is, 
+
+```javascript
+router.get('/', (req, res, next) => {
+  res.json({msg: `It's working!`})
+})
+```
+
+in `movieRouter` is equivalent to 
+
+```javascript
+app.get('/movie', (req, res, next) => {
+  res.json({msg: `It's working!`})
+})
+```
+
+if the above were in `app.js`. All this to say: don't do something like 
+
+```javascript
+router.get('/movie', (req, res, next) => {
+  res.json({msg: `It's working!`})
+})
+```
+
+in `movieRouter` if you're trying to manage a `GET` request to `/movie`; the above code would manage a `GET` request to `/movie/movie`. 
+
+---
+
+</details>
+
+<details><summary> <strong>Setting environment variables (e.g., <code>PORT</code> to listen on) via <code>.env</code> from <code>dotenv</code> module</strong></summary>
+
+Now that we have the basic structure of how our endpoints are going to work in our application (FYI: this is something you should spend a nontrivial amount of time thinking about; poor application structure can lead to major problems down the road), we want to actually build a route. Before we do that, however, recall the following lines from `bin/www`, the entry point for our application:
+
+```javascript
+var port = normalizePort(process.env.PORT || '3000');
+app.set('port', port);
+```
+
+You can change the `3000` manually or, as noted in the code above, you can set a `process` environment variable named `PORT` which, if defined, will take precedence over `3000` and be used as the port on which to listen to instead. What is `process` in Node.js? As [the docs](https://nodejs.org/api/process.html#process_process) note: The `process` object is a `global` that provides information about, and control over, the current Node.js process. As a global, it is always available to Node.js applications without using `require()`. It can also be explicitly accessed using `require()`:
+
+```javascript
+const process = require('process');
+```
+
+So you won't often `require` `process` since it is made available globally. One thing you will often want to install as a dependency in your project is the `dotenv` module: `npm install dotenv`. This module, as noted in [the docs](https://www.npmjs.com/package/dotenv), is a zero-dependency module that loads environment variables from a `.env` file into `process.env`. Storing configuration in the environment separate from code is based on the [The Twelve-Factor App](https://12factor.net/config) methedology. 
+
+The docs note that, as early as possible in the application, we should require and configure dotenv:
+
+```javascript
+require('dotenv').config()
+```
+
+For this to be of any use, we should create a `.env` file in the root directory of our project and add environment-specific variables on new lines in the form of `NAME=VALUE`. For example:
+
+``` BASH
+DB_HOST=localhost
+DB_USER=root
+DB_PASS=s1mpl3
+```
+
+`process.env` now has the keys and values you defined in your `.env` file. One potential "gotcha" though: [the default](https://www.npmjs.com/package/dotenv#config) `path` property used in `.config()`, namely `path.resolve(process.cwd(), '.env')` reflects the expectation that our `.env` file is located in the root directory of our project. As [the Node docs note](https://nodejs.org/api/process.html#process_process_cwd), the `process.cwd()` method returns the current working directory of the Node.js process. We may specify a custom path if our `.env` file containing environment variables is located elsewhere. For example:
+
+```javascript
+require('dotenv').config({ path: '/full/custom/path/to/your/env/vars' })
+```
+
+As noted above, `require('dotenv').config()` is equivalent to the following by default:
+
+```javascript
+require('dotenv').config({ path: path.resolve(process.cwd(), '.env') })
+```
+
+Finally, in [the FAQ](https://www.npmjs.com/package/dotenv#should-i-commit-my-env-file) for `dotenv`, we see strong advice to 
+
+1\. **NEVER COMMIT YOUR `.env` FILE**: We **strongly** recommend against committing your `.env` file to version control. It should only include environment-specific values such as database passwords or API keys. Your production database should have a different password than your development database. Add `.env` to your `.gitignore_global`. If you don't have a global `.gitignore` file, then see [this guide](http://egorsmirnov.me/2015/05/04/global-gitignore-file.html) on how to set up and configure one (you do not want to add `.env` every time to your local `.gitignore`). Below you can find the `.gitignore_global` I currently use:
+
+<details><summary> <strong>My current <code>.gitignore_global</code></strong></summary>
+
+``` BASH
+# Compiled source #
+###################
+*.com
+*.class
+*.dll
+*.exe
+*.o
+*.so
+
+# Packages #
+############
+# it's better to unpack these files and commit the raw source
+# git has its own built in compression methods
+*.7z
+*.dmg
+*.gz
+*.iso
+*.jar
+*.rar
+*.tar
+*.zip
+
+#dotenv
+.env
+env.sh
+
+#node file
+node_modules
+sessions
+
+# Logs and databases #
+######################
+*.log
+*.sql
+*.sqlite
+
+# OS generated files #
+######################
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+#for Python:
+__pycache__
+*.pyc
+
+#for React
+dist
+```
+
+---
+
+</details>
+<br>
+
+2\. **NEVER HAVE MORE THAN ONE `.env` FILE:**  We **strongly** recommend against having a "main" `.env` file and an "environment" `.env` file like `.env.test`. Your config should vary between deploys, and you should not be sharing values between environments.
+
+The point is that it is a very good idea to set up a `.env` file and store stuff you need in multiple places that may change there (e.g., the `PORT` number, API keys, different passwords, etc.).
+
+---
+
+</details>
+
+<details><summary> <strong>First route and middleware</strong></summary>
+
+We want to build our first route. And our first route on the website was the homepage route. And that was really the `now_playing` data and we can't use `now_playing` because that's going to require dynamic data and we don't have dynamic data (also recall that we're not interested in rendering views at all but only responding with data in the form of JSON since we are building an API).  
+
+The route we are going to try to imitate, in essence at least, is the [/movie/now_playing](https://developers.themoviedb.org/3/movies/get-now-playing) one but we'll use `most_popular` and we will do so through the static data in our `movies.js` file in our `data` directory. As [the docs](https://developers.themoviedb.org/3/movies/get-now-playing) note for getting the movies that are now playing, the query string *must* have an `api_key` equivalent to some string. And we can imitate this requirement fairly easily. We can also bake in a contrived use of the optional `page` parameter in the query string. We won't bother with `language` and `region`. 
+
+So here is what the `indexRouter` might look like so far:
+
+```javascript
+const express = require('express');
+const router = express.Router();
+
+const movies = require('../data/movies');
+
+/* GET home page. */
+router.get('/', function(req, res, next) {
+  res.render('index', { title: 'Express' });
+});
+
+router.get('/most_popular', (req, res, next) => {
+  const { page, api_key } = req.query;
+  console.log(req.query)
+  if (page === undefined) { page = 1;}
+  if (api_key != '123456789') {
+    res.json({unauthorized: `Invalid API Key`});
+  } else {
+    let results = movies.filter(movie => movie.most_popular === true);
+    console.log(results.length)
+    results = results.slice((page - 1) * 20, page * 20);
+    res.json(results)
+  }
+})
+
+module.exports = router;
+```
+
+We can actually test this using the movieFanApp we built earlier by dumping the following into our `indexRouter`:
+
+```javascript
+const apiKey = process.env.OUR_OWN_API_KEY; // for testing our own API
+const apiBaseUrl = 'http://localhost:3030'; // for testing our own API
+const nowPlayingUrl = `${apiBaseUrl}/most_popular?api_key=${apiKey}`; // for testing our own API
+```
+
+One important thing to note, however, is from [the docs](https://developers.themoviedb.org/3/movies/get-now-playing) in the movie database we see the response will be `application/json` which is great, but the response data type is expected to be an `object` with a `results` property whose value is the retrieved data. So we need to make sure we return an object whose `results` property holds the actual data, and we can do this pretty easily: `res.json({results})` instead of `res.json(results)`. 
+
+Another thing to note is that in our previous application the route we were going to for `nowPlayingUrl` was `movie/now_playing` but instead now it is just `most_popular`. 
+
+The previous point about sending over an object whose `results` property held an array of data is pretty normal in API design. Why? Well, often you will want to send over *more* than just the requested data. Maybe in our response we want to also send over how many pages were requested. Etc. So instead of just `res.json({results})`, it might be good to have something like 
+
+```javascript
+res.json({
+  page,
+  results // ... other stuff
+})
+```
+
+So right now our `indexRouter` might look like the following:
+
+```javascript
+const express = require('express');
+const router = express.Router();
+
+const movies = require('../data/movies');
+
+router.get('/', function(req, res, next) {
+  res.render('index', { title: 'Express' });
+});
+
+router.get('/most_popular', (req, res, next) => {
+  let { page, api_key } = req.query;
+  console.log(req.query)
+  if (page === undefined) { page = 1;}
+  if (api_key != '123456789') {
+    res.json({unauthorized: `Invalid API Key`});
+  } else {
+    let results = movies.filter(movie => movie.most_popular === true);
+    console.log(results.length)
+    results = results.slice((page - 1) * 20, page * 20);
+    console.log(results)
+    res.json({
+      page,
+      results
+    })
+  }
+})
+
+module.exports = router;
+```
+
+---
+
+</details>
+
+<details><summary> <strong><code>/movie</code> routes, some header work, and <code>return</code>ing in a route (e.g., <code>return res.json</code>, <code>return next()</code>, etc.) to prevent further callback execution</strong></summary>
+
+We have covered the `/most_popular` route, and now it is time to handle the `/movie` and `/search` routes. Let's go ahead and generate a table/list of some of the routes we will want to build:
+
+| Method | Route | API Reference |
+| :-: | :-- | :--|
+| `GET` | `/movie/movieId` | API ref: [get movie details](https://developers.themoviedb.org/3/movies/get-movie-details) |
+| `GET` | `/movie/top_rated` | API ref: [get top rated movies](https://developers.themoviedb.org/3/movies/get-top-rated-movies) |
+| `POST` | `/movie/{movie_id}/rating` | API ref: [post movie rating](https://developers.themoviedb.org/3/movies/rate-movie) |
+| `DELETE` | `/movie/{movie_id}/rating` | API ref: [delete movie rating](https://developers.themoviedb.org/3/movies/delete-movie-rating) |
+| `GET` | `/movie` | API ref: [tbd](tbd) |
+
+In setting up our API, if we require an API key, which we do in this case, then it starts to become cumbersome to check in each route whether or not a correct API key was added. We could copy code from before:
+
+```javascript
+if (api_key != '123456789') {
+  res.json({unauthorized: `Invalid API Key`});
+} // ...
+```
+
+But copying code is a bad idea! So many opportunities for issues. As Rob says, "You do not want to be clever as a developer. You always want to make things as simple as possible." This is a perfect use case for two lessons: 
+
+1. We can write some middleware, and we probably want to do this at the application level with `app.use` instead of `router.use`. We could certainly do `router.use`, but why restrict ourselves if we are going to require an API key for retrieving data on *all* of our routes?  
+
+We can do something like the following (and we'll put this code just below our invocation of `helmet`; that is, we'll put it up near the top of our application; we want it firing off first):
+
+```javascript
+app.use((req, res, next) => {
+  // cut off the API response if the API key is bad
+  const {api_key} = req.query;
+  api_key != '123456789' ? res.json({unauthorized: `Invalid API Key`}) : next();
+})
+```
+
+In production or in a real application with a database, you would query the database in the middleware to see if their API key was valid. We don't have that right now so we are just checking for the hard number. 
+
+2. One more thing we need to do above is realize that Express is automatically going to provide a `200` status code, and what we are sending back is *not* indicative of a `200` status. That is, we are responding with JSON, but the JSON we are responding with is not what the user expects--it is a failure due to a bad or nonexistant API key. So this is a perfect use case `res.status(401)`, where `401` is an unauthorized status code meaning. 
+
+So we should ideally end up with something like the following in our `app.js` to use at the application level:
+
+```javascript
+app.use((req, res, next) => {
+  // cut off the API response if the API key is bad
+  const {api_key} = req.query;
+  if (api_key != '123456789') {
+    res.status(401); // unauthorized = 401
+    res.json({unauthorized: `Invalid API Key`})
+  } else {
+    next();
+  }
+})
+```
+
+When working on the `/movie/top_rated` route, we may run into an issue with how things are currently structured: 
+
+```javascript
+router.get('/:movieId', ...) 
+
+router.get('/top_rated', ...)
+```
+
+As [Mozilla notes](https://developer.mozilla.org/en-US/docs/Learn/Server-side/Express_Nodejs/routes), the URL `/movie/top_rated` will be matched by a route like `/movie/:movieId` (which will extract a "movieId" value of '`top_rated`'). The first route that matches an incoming URL will be used, so if you want to process `/movie/top_rated` URLs separately, then their route handlers must be defined before your `/movie/:movieId` route. 
+
+This gives us the opportunity to note a few important observations that have so far not been stressed, namely that callbacks in route matchers are just JavaScript callbacks and sometimes it can be wise to `return` the response we want to send back (or `return next()` or `return next('route')`) whether it's `return res.json`, `return res.render`, etc.; otherwise, you risk possibly trying to set the headers more than once for a response.
+
+<details><summary> <strong>Explicitly <code>return</code>ing a response or control to the next middleware (i.e., <code>return next()</code>) or route (i.e., <code>return next('route')</code></strong></summary>
+
+- **Callback functions in route handlers are just normal callbacks:** Something like `router.get('/some_route', callback)` in Express simply means, "Hey JavaScript, when `/some_route` is matched, I want you to execute my `callback` (typically in Express an anonymous function with `req`, `res`, and `next` arguments). Generally speaking, within the `callback` we will run some logic having to do with `req` and/or `res`, and if we do not want to pass control to the `next` piece of middleware, then we should *respond* whether with `res.json` (e.g., when we are building an API), `res.render` (e.g., when we are building a server-side rendered application), `res.download`, `res.sendFile`, etc. Here's the key point to note: Typically, the code in your callback naturally ends by using `res.METHOD` to send a response, but *there's nothing magical about `res.METHOD` in influencing when the `callback` is complete/incomplete*. That is, you can still use `res.json` or generally `res.METHOD` in your callback and the headers for your response will likely be set and the response sent, but your callback function does not actually terminate. The code will continue to execute, as [this post](https://stackoverflow.com/a/37314619/5209533) illustrates. To avoid this, if it poses a potential problem, we can simply use `return` to stop executing the `callback`; that is, instead of using `res.json` and then the subsequent code running, we can simply `return res.json`, and this will ensure the callback execution is halted/completed.
+- **Returning `next()` and/or `next('route')`:** [Here](https://stackoverflow.com/q/16810449/5209533) is a great thread on when to use `next()` or `return next()` and, by extension, when to use `next('route')` or `return next('route')`.  As the chosen answerer notes, some people *always* write `return next()` to ensure that the execution of the current callback (i.e., the current route handler) stops after triggering the next callback (i.e., the next callback in the route middleware stack or the next matched route callback). If you do not use `return`, then you risk triggering the callback a second time later, which usually has devastating results (e.g., trying to set the headers for a response after the response has already been sent). Also, per the point directly above, if you do not `return` within your callback, then some rather funky things can happen, as reflected by what shows up in the console if you are testing or what may break your app. 
+
+Everything said above about `next()` and `return next()` equally applies to `next('route')` and `return next('route')`. Consult [this resource](https://expressjs.com/en/guide/using-middleware.html) if you need a refresher about `next('route')`; essentially, to skip the rest of the middleware functions from a router middleware stack (typically we only have one but we may have more than one, as our example below will show), call `next('route')` to pass constrol to the next route. 
+
+Consider the following rather funky looking code: 
+
+```javascript
+app.get('/example', (req, res, next) => {
+  console.log('Log 1')
+  next()
+  console.log('Log 2')
+}, (req, res, next) => {
+  console.log('Log 3')
+  return next()
+  console.log(`Log 4`)
+}
+)
+
+app.get('/example', (req, res, next) => {
+  console.log('Log 5')
+  next('route')
+  console.log('Log 6')
+}, (req, res, next) => {
+  console.log('Log 7')
+  next()
+  console.log('Log 8')
+})
+
+app.get('/example', (req, res, next) => {
+  console.log('Log 9')
+  return next('route')
+  console.log('Log 10')
+}, (req, res, next) => {
+  console.log('Log 11')
+  next()
+  console.log('Log 12')
+})
+
+app.get('/example', (req, res, next) => {
+  console.log('Log 13')
+  console.log(`Header sent? `, res.headersSent)
+  res.json({ msg: 'We should be done now' })
+  console.log(`Header sent? `, res.headersSent)
+  console.log('Log 14')
+})
+```
+
+What do you think will be logged to the console when you visit `/example`? Take a moment and try to figure it out. Here's the result:
+
+``` BASH
+Log 1
+Log 3
+Log 5
+Log 9
+Log 13
+Header sent?  false
+Header sent?  true
+Log 14
+Log 6
+Log 2
+```
+
+As you can tell from what is logged to the console above, we get *very* different behavior than what we might expect otherwise. Basically, when we call `next` (whether or not `'route'` is passed to it) we are passing control to the *next* piece of middleware, but if we haven't ended the callback we were in when we called `next`, then control will eventually be passed back to this callback, and this control being passed back is where issues can happen with accidentally trying to set the headers more than once.
+
+For a slightly more basic example to bring the point home, consider the following code:
+
+```javascript
+app.get('/another_example', (req, res, next) => {
+  console.log('This is a middleware')
+  next()
+  console.log('This is first-half middleware')
+})
+
+app.get('/another_example', (req, res, next) => {
+  console.log('This is second middleware')
+  next()
+  console.log('This is second half-middleware')
+})
+
+app.get('/another_example', (req, res, next) => {
+  console.log('This is third middleware')
+  next()
+})
+```
+
+What will be logged to the console?
+
+``` BASH
+This is a middleware
+This is second middleware
+This is third middleware
+This is second half-middleware
+This is first-half middleware
+```
+
+As can be seen above (and also before in the more complicated example), if a function's body has not finished executing but passes off control to another handler, then control is successfully passed back to the executing bodies in a stack-like fashion. That is, `console.log('This is second half-middleware')` runs before `console.log('This is first-half middleware')` when passing control back up because the second route handler (which tries to log `'This is second half-middleware'`) was later on the stack than the first route handler (which tries to log `'This is first-half middleware'`). 
+
+---
+
+</details>
+
+In summary, in the context of our movie fan API, we really should put the `/top_rated` route first and the `:movieId` wildcard one last. That is, for the `/movie` route, `/movie/:movieId` will unintentionally match anything submitted as just `/movie/SOMETHING`. So our wildcard route, if it's only matching one thing, should really go last.
+
+Before we move on to the `POST` and `DELETE` routes, it may be of interest to note that there are a *ton* of routes that will use the `:movieId` wildcard. It may be useful on occasion to detect when this wildcard appears in a matching route. Can we recall a way to run a callback if that wildcard is present? The `router.param()` [method](https://expressjs.com/en/api.html#router.param) will do the trick. We can hand this method any string and if that string matches a wildcard in the route, then the callback we pass to `router.param` will fire off. 
+
+As the docs note, to use `router.param(name, callback)` effectively, we first pass a `name` that represents the wildcard that, when detected in a matching route, will trigger the execution of the `callback`. In our case, the wildcard name to possibly pass `router.param` is `movieId`. The parameters of the callback function itself are as follows:
+
+- `req`: The request object
+- `res`: The response object
+- `next`: Indicating the next middleware function
+- The value of the `name` parameter
+
+Don't forget the fourth parameter. It gives you access to the *value* of whatever `name`ed wildcard was used in the matching route. As the docs further note, a use case might have to deal with when `:user` is present in a route path--we could map user loading logic to automatically provide `req.user` to the route or perform validations on the parameter input:
+
+```javascript
+router.param('user', function (req, res, next, id) {
+  // try to get the user details from the User model and attach it to the request object
+  User.find(id, function (err, user) {
+    if (err) {
+      next(err)
+    } else if (user) {
+      req.user = user
+      next()
+    } else {
+      next(new Error('failed to load user'))
+    }
+  })
+})
+```
+
+Another thing to note is that `param` callback functions are local to the router on which they are defined. That is, they are not inherited by mounted apps or routers. Hence, `param` callbacks defined on `router` will be triggered only by route parameters defined on `router` routes. A `param` callback will be called only once in a request-response cycle, even if the parameter is matched in multiple routes (hence `router.param(name, callback)` is a good thing to potentially use *before* you want to pass off handling logic to the matching routes' callbacks), as shown in the following examples:
+
+```javascript
+router.param('id', function (req, res, next, id) {
+  console.log('CALLED ONLY ONCE')
+  next()
+})
+
+router.get('/user/:id', function (req, res, next) {
+  console.log('although this matches')
+  next()
+})
+
+router.get('/user/:id', function (req, res) {
+  console.log('and this matches too')
+  res.end()
+})
+```
+
+A `GET` request to `/user/42` will result in the following being logged to the console:
+
+``` BASH
+CALLED ONLY ONCE
+although this matches
+and this matches too
+```
+
+The point is that we may want to add some data analytics before passing control to a route handler, validate things concerning API key usage, or whatever it might be. `router.param` is our chance (and only chance) to run logic on the value of the `name`ed parameter that is passed before passing control to the matched routes and their callbacks. 
+
+We can now work on our `POST` route. If we look at [the API docs](https://developers.themoviedb.org/3/movies/rate-movie) for what we are trying to mimic, then we will see that the `Content-Type` header is required and is expected to be `application/json`. We are going to require the `Content-Type` to be `application/json`. We can test things out initially (using Postman) as follows:
+
+```javascript
+router.post('/:movieId/rating', (req, res, next) => {
+  let { movieId } = req.params;
+  console.log(req.get('Content-Type'))
+  res.json({ msg: 'Test' })
+})
+```
+
+If our request body is empty, then we will see `undefined` get logged to the console. If we put in some dummy text to the body (e.g., `name` of `Daniel`), then we will see `application/x-www-form-urlencoded` get logged to the console. We don't want to accept this--we are not willing to accept a `Content-Type` of `application/x-www-form-urlencoded`--we want `application/json`. We can easily check things using the [req.is(type)](https://expressjs.com/en/4x/api.html#req.is) method (recall: this method returns the matching content type if the incoming request's `Content-Type` HTTP header field matches the MIME type specified by the `type` parameter--if the request has no body, then this method will return `null` or will return `false` otherwise). We could modify our `POST` route in the following manner:
+
+```javascript
+router.post('/:movieId/rating', (req, res, next) => {
+  let { movieId } = req.params;
+  if (!req.is('application/json')) {
+    return res.json({ msg: `Content-Type must be application/json` })
+  }
+  else {
+    return res.json({ msg: `Request successful` })
+  }
+})
+```
+
+Now, if we look at [the API docs](https://developers.themoviedb.org/3/movies/delete-movie-rating) for deleting a movie rating, we will see we want to require `Content-Type` of `application/json` as well. So we could create the `DELETE` route and copy over some of the code above, but copying over the code is rarely advisable! Instead, it would probably be wise to *define* (i.e., not use at the router-level but simply define to use within certain `/movie` routes) some middleware at the top of our `/movie` route, say `requireJSON`, that handled this task upfront. For example:
+
+```javascript
+function requireJSON(req, res, next) {
+  if (!req.is('application/json')) {
+    return res.json({ msg: `Content-Type must be application/json` })
+  }
+  else {
+    return res.json({ msg: `Request successful` })
+  }
+}
+```
+
+And then we could call this function within the routes where we needed to:
+
+```javascript
+router.post('/:movieId/rating', (req, res, next) => {
+  requireJSON(req, res, next)
+})
+```
+
+But this is still not a very good strategy to use the defined middleware *within* the first callback in our route handler. Instead, this is a great use case for passing *more than one* piece of middleware to a route handler. We can now truly make use of the middleware stack for a route like so:
+
+```javascript
+router.post('/:movieId/rating', requireJSON, (req, res, next) => {
+  // ...
+})
+```
+
+Of course, now we need to modify `requireJSON` so that if the `Content-Type` is what we want, namely `application/json`, then we don't respond with JSON but forward control to the next piece of middleware. 
+
+Now, returning to [posting a movie rating](https://developers.themoviedb.org/3/movies/rate-movie), we see that the request body accepts a named object with a `value` property and a `number` value associated with this property, where the `number` is the value of the rating that is desired to be submitted, and the number value is to be between 0.5 and 10.0. With all of this said, our `POST` route could work as follows: 
+
+```javascript
+router.post('/:movieId/rating', requireJSON, (req, res, next) => {
+  let { movieId } = req.params;
+  let { value: userRating } = req.body;
+  if ((userRating < 0.5) || (userRating > 10)) {
+    return res.json({ msg: 'Rating must be between .5 and 10' })
+  } else {
+    return res.json({ 
+      status_code: 200,
+      msg: 'Thank you for submitting your rating'
+    })
+  }
+})
+```
+
+Now, of course, you would insert the ratings through SQL in your database if we were dealing with a database. But we aren't. So that is it for our `POST` route. 
+
+---
+
+</details>
+
+<details><summary> <code>/search</code> routes with <code>router.use()</code><strong></strong></summary>
+
+Our final task here is to handle the `/search` routes. We can consult [the API docs](https://developers.themoviedb.org/3/search/search-companies) for searching for movies and we can note the different possibilities for searching [for people](https://developers.themoviedb.org/3/search/search-people) and [for movies](https://developers.themoviedb.org/3/search/search-movies). We can deal with the [search movies](https://developers.themoviedb.org/3/search/search-movies) one first. Looking at the docs, we see for the query string to `/search/movie` that an API key is required. Great! We've already dealt with this at the application level. We also see that `query` needs to be present in the query string and its value needs to be of type `string` and represents text by which to query a result and the value should be URI encoded with a `minLength` of 1. The same is true for `/search/person` (i.e., we need the query string to have `query` in it with things as specified above). We could write some middleware at the top of our route to use in some select matching routes and then pass this middleware as the first function to run for the middleware run on matching routes:
+
+```javascript
+function queryRequired(req, res, next) {
+  if (!searchTerm) return res.json({msg: 'Query is required'});
+  else return next();
+}
+```
+
+But what if we *always* need `query` to appear in the query string (this is the case on the real movie database API for *all* search possibilities)? Then it makes little sense to use the above middleware on *all* routes and specify so within all matching routes. This is where something like `router.use` could be helpful! We can simply declare `router.use(queryRequired)` underneath our middleware declaration above. Note that `router.use` limits in scope whatever middleware is being used to the specific router in question.
+
+---
+
+</details>
+
+
+
+
+
 
 
 ## Course Questions to Follow Up On
 
 - TBD
-
