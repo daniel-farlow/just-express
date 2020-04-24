@@ -4959,7 +4959,7 @@ Now, of course, you would insert the ratings through SQL in your database if we 
 
 </details>
 
-<details><summary> <code>/search</code> routes with <code>router.use()</code><strong></strong></summary>
+<details><summary> <strong><code>/search</code> routes with <code>router.use()</code></strong></summary>
 
 Our final task here is to handle the `/search` routes. We can consult [the API docs](https://developers.themoviedb.org/3/search/search-companies) for searching for movies and we can note the different possibilities for searching [for people](https://developers.themoviedb.org/3/search/search-people) and [for movies](https://developers.themoviedb.org/3/search/search-movies). We can deal with the [search movies](https://developers.themoviedb.org/3/search/search-movies) one first. Looking at the docs, we see for the query string to `/search/movie` that an API key is required. Great! We've already dealt with this at the application level. We also see that `query` needs to be present in the query string and its value needs to be of type `string` and represents text by which to query a result and the value should be URI encoded with a `minLength` of 1. The same is true for `/search/person` (i.e., we need the query string to have `query` in it with things as specified above). We could write some middleware at the top of our route to use in some select matching routes and then pass this middleware as the first function to run for the middleware run on matching routes:
 
@@ -4975,6 +4975,443 @@ But what if we *always* need `query` to appear in the query string (this is the 
 ---
 
 </details>
+
+## Passport
+
+<details><summary> <strong>Introduction to Passport</strong></summary>
+
+[Passport](http://www.passportjs.org/) is what it claims to be: unobtrusive authentication for Node.js. They give us a little bit more of a sell: "Passport is authentication middleware for Node.js. Extremely flexible and modular, Passport can be unobtrusively dropped in to any Express-based web application. A comprehensive set of strategies support authentication using a username and password, Facebook, Twitter, and more."
+
+Two important keywords from the above: authentication and middleware. The reason you use Passport is because you have users. You need people to be able to log in. That's what the authentication part is. And that's what Passport is for! It's meant to make it easy for you to have user accounts on your website. Also, it is middleware for Node.js. It doesn't say anything about Express, and that is perfectly fine because remember that Express *is* Node.js. Also, Express does not need Passport in order to do authentication, but like Express is to Node.js (i.e., you can write a Node.js web server, but there's no reason to do that because Express makes it so easy), there's very little reason to do authentication in Express without Passport because Passport has taken care of most stuff that you need. So Passport and Express are not dependent on each other in any way, but they're almost always used together for the sake of simplicity. The middleware part should really sing to us because it just means it's stuff happening between request and response. This is where Passport is going to live (i.e., between the request and response). 
+
+Something to note: Passport itself is the starting block. You will never just use it by itself. Instead, you use a *strategy*. And we can look at all of the listed [strategies](http://www.passportjs.org/packages/) that Passport lends itself to being used for. What is a strategy? It's simply what you want to use for your authentication (e.g., Facebook, Twitter, GitHub, etc.). So you may have more than strategy. You often see on a site how you can log in or sign up with Google, Facebook, GitHub, etc. Those are all popular strategies. The point is that all of the strategies are going to be building blocks on top of the base module.
+
+We are going to use the [passport-github](http://www.passportjs.org/packages/passport-github/) strategy strategy for authenticating with GitHub using the OAuth 2.0 API. But first we need to talk about OAuth 2.0.
+
+---
+
+</details>
+
+<details><summary> <strong>Overview of OAuth 2.0</strong></summary>
+
+Before we get into talking about Passport, using it, and then employing the GitHub strategy, we should talk about what OAuth is. The great news is that you don't really need to know how any of it works because all of it is taken care of for you in the module, but it's always good to know what's really going on so you know what you're using and what you're exposing. 
+
+Back in the 1990s, users had maybe one account somewhere, and they had to just remember one password. And it was awesome because you could make it something really easy to remember. But then we got to the 2000s where things got a little stickier. Now you probably have dozens of accounts, but maybe you are still sticking with that one password, and you're using it for just about everything. But eventually that kind of gets broken, and then you go to one slightly harder password. And then we get into the 2010s, and now maybe you have hundreds of accounts which now means you're going to need hundreds of passwords because bad actors have gotten much more powerful with their capabilities in recent years. The problem is it's really hard to remember hundreds of passwords!
+
+So what do we do? We want to make a really cool application, but we need user accounts. And we don't want their one killer password that they use everywhere because then we are responsible if we end up with a security breach. But we also don't want them to have to create one more password to throw on top of several of their probably already existing passwords. This is where 0Auth comes in. It's not really so much of a protocol so much as it is a standard. It's almost like a framework or a way of doing things. The fancy word/phrase for what it does is "access-delegation". And what that means is we have a bunch of trustworthy (or maybe not so trustworthy, but we trust them more than ourselves perhaps in terms of handling authentication) companies out on the web: Google, Facebook, Microsoft, Twitter, Amazon, GitHub, etc. These are big companies that have *huge* security teams that we would like standing between us and the end-users of our application. And the odds are pretty high now that someone has a Google account, an Amazon account, a Twitter account, etc. Basically, we want one of the companies with which the user has already shared data to share some of that data with us too (i.e., we want the user to delegate to us access to some of their information by means of a company they have already shared their data with). The whole thing is basically a mutual agreement, "Hey! You want to use my application, but you need a secure account. Oh, you trust this big company and have shared your data with them? Cool! I trust them too. Why don't we just offload the security burden on to them and save both of us some hassle?"
+
+This whole process starts back near the beginning when we are developing our application. We decide for our authorization that we want to make GitHub available. (Note: There's any number of companies that could be an option here, not just big companies. Anyone who follows the OAuth standard would be an option, but most users are often comfortable using a company they think safeguards their data.) In order for us to be able to talk to GitHub and be able to use them for authentication, we have to set up an applicaiton. And when we set up our application GitHub is going to issue us a client ID, a secret, and we're going to tell them what callback is allowed. All of this creates a relationship between our application and GitHub:
+
+- `clientID`: The clientID is public. It's like our public key. Everybody can know that this clientID references our application.
+- `secret`: The secret is like *our* password (i.e., the developer's password) so that when we want to talk with GitHub about our application we can prove it is actually us. 
+- `callback`: The callback is the only place that GitHub will send users after they have been authenticated because the user is going to go off our site briefly to be authenticated by GitHub.  
+
+So all of the above happens before anything else. Here's the basic process for how things work once we start getting users: We set up our application with GitHub. We finish our application and roll it out and it's a huge success. We have one of many users somewhere on their laptop trying to access our site. Let's say they go to the `/login` page because they want to log in. Well, we will immediately turn around and send them off to GitHub along with our clientID. So the whole Internet knows about our clientID or can know. Makes no difference to us. We send the user off with our clientID so they can effectively ask GitHub which application they want to use. The user now leaves our website completely. And now the user is talking to GitHub (and we have no idea that this is going on; we, meaning our application, are not at all a part of the conversation the user is having with GitHub ... we're simply waiting at this point). The user will send over to GitHub the clientID that we gave them, and GitHub will ask the user to log in to GitHub with their own credentials. Once the user has successfully logged in to GitHub, GitHub will recognize the user as one of their own users and will acknowledge that they know about or recognize the clientID and what application it points to. They'll tell the user that our application wants whatever kind of data we are requesting (typically an email or something like that--basically whatever is public). GitHub will prompt the user to make sure the user is okay with GitHub sharing that data with our application. Hopefully the user answers in the affirmative. If so, then GitHub will send the user an access token. This access token is specific to our application and the conversation the user had with GitHub. GitHub then tells the user they are supposed to go to our callback function along with their access token. So the user gets redirected back to our site to the one place we said is okay to send them to. In our callback, we take the user's access token, our secret, and our clientID, and we send them all over to GitHub, and GitHub says, "Yes, this is the right secret for this clientID, this callback is the right place so I will honor this request. This access token you sent me matches the access token I sent the user who logged in a moment ago, and that user said it was okay to share this data with you." Here is a slightly jumbled picture of the process:
+
+<p align='center'>
+  <img width="500px" src='./images-for-notes/passport-github.png'>
+</p>
+
+It may look somewhat confusing, but it's just a couple different pieces talking with each other. And there's a couple different things to match up:
+
+- `clientID`: The clientID our application has associated with GitHub needs to match the clientID the user gives GitHub when they temporarily leave our site.
+- `access token`: The access token given to the user by GitHub when the user logs in to GitHub needs to match the access token we send to GitHub when we are trying to pull the user's data.
+- `secret`: When we request the user's data from GitHub, the secret we send (along with the clientID and user access token) needs to match the secret associated with our application that we received when we first set up our application with GitHub. 
+- `callback`: Finally, the callback we establish with GitHub when we set up our application needs to match the callback the user gets to after leaving GitHub once they've logged in to GitHub (in order to guarantee they're not being spoofed or coming from the wrong place).
+
+So just a whole bunch of checks and balances in order to make sure our conversation with GitHub is legitimate (because we don't want someone spoofing us) and also that the user conversation with GitHub is legitimate (because the user doesn't want someone spoofing them). These "matches" can be highlight in the above image:
+
+<p align='center'>
+  <img width="500px" src='./images-for-notes/passport-github-checks-and-balances.png'>
+</p>
+
+So those are all the different transactions and requests that need to happen in order to satisfy OAuth 2.0. The good news is that, in spite of however confusing the above may seem, the different strategies that Passport employ basically make it so you don't have to do anything other than put in the secret and clientID. That's why a lot of people use Passport--because so much of the work is already done for you. Eventually, of course, you'll run into something that is not supported or there's no strategy or there's not a solid strategy anyway, so you'll have to write the HTTP request yourself, and that can be a bit fun despite the tangle (and those will be extreme cases anyway).
+
+One other piece to touch on to more or less complete the OAuth cycle/framework overview is to recognize that the OAuth server is basically two pieces:
+
+1. Authorization server
+2. Resource server
+
+Both servers are part of the same system (e.g., GitHub, Facebook, Google, or whoever). These two servers are together in the sense that they are under the same control, but they are otherwise completely separate. The user is only going to communicate with the authorization server. This is where the user will go to make what's called an authorization request, and the authorization server will send back what's called an authorization grant, namely the access token. Our application, on the other hand, is going to get the access token granted to the user in the authorization step, we are going to send the access token over to the resource server, and then the resource server is going to send back the data or whatever the resource happens to be. So the user's entire experience is with the authorization server while our application's entire experience is with the resource server. The authorization and resource server make up a system that can talk with itself while the user and our application are talking. The process looks somewhat like this:
+
+<p align='center'>
+  <img width="400px" src='./images-for-notes/passport-github-oauth-servers.png'>
+</p>
+
+---
+
+</details>
+
+<details open><summary> <strong>Passport and the GitHub strategy</strong></summary>
+
+There are a bunch of little things needed in order to make Passport work properly. We'll handle each piece in turn and just deal with the errors as they crop up. In [the docs](http://www.passportjs.org/docs/authenticate/) we can head to the Authenticate section and we'll start there. The first thing we should do is copy over the contents from our previous `movieFanApp`:
+
+``` BASH
+cp -R movieFanApp movieFanAppWithGitHubAuth
+```
+
+The only two files we will need after we have copied the contents over successfully are the `app.js` and `indexRouter` (`index.js` in `routes` or whatever you have called the router for the index). First we will change "Login" in our `navbar.ejs` to "Login with GitHub". Right now we do not have a `/login` route in our application so we will need to make that. 
+
+If we go back to the docs under the Authenticate section we will see the following: "Authenticating requests is as simple as calling `passport.authenticate()` and specifying which strategy to employ. `authenticate()`'s function signature is standard [Connect](https://github.com/senchalabs/connect#readme) middleware, which makes it convenient to use as route middleware in [Express](http://expressjs.com/) applications."
+
+As far as Connect is concerned, prior to Express 4, Express was based on Connect. So Connect middleware is kind of the same thing as Express, meaning Express middleware and Connect middleware are essentially the same thing which is why they say it is convenient to use in Express applications. They even give us an example:
+
+```javascript
+app.post('/login',
+  passport.authenticate('local'),
+  function(req, res) {
+    // If this function gets called, authentication was successful.
+    // `req.user` contains the authenticated user.
+    res.redirect('/users/' + req.user.username);
+  });
+```
+
+The point is that `passport.authenticate('local')` is middleware so it's the first thing that's going to happen if the route matches. We pass the strategy we want to use to `authenticate`. Remember that Passport is useless without a strategy. You can think of Passport as a key ring. Passport is your key ring, and the strategies you use are the keys. Since we will be using the GitHub strategy, we can go ahead and install these dependencies in our project: 
+
+``` BASH
+npm install passport passport-github
+```
+
+Then we can drop the following into our `app.js` right underneath requiring our third-party modules:
+
+```javascript
+//=============== PASSPORT FILES ===============//
+const passport = require('passport');
+const GitHubStrategy = require('passport-github').Strategy;
+//==============================================//
+```
+
+Now, as the [passport-github docs](http://www.passportjs.org/packages/passport-github/) note: Before using `passport-github`, you must register an application with GitHub. If you have not already done so, a new application can be created at [developer applications](https://github.com/settings/applications/new) within GitHub's settings panel. Your application will be issued a client ID and client secret, which need to be provided to the strategy. You will also need to configure a callback URL which matches the route in your application."
+
+If we go to set up a new application, we will be prompted with something that looks like the following: 
+
+<p align='center'>
+  <img width="400px" src='./images-for-notes/passport-github-newapp.png'>
+</p>
+
+We are doing the pre-work to set up a relationship between our application and GitHub. We have to establish that relationship first before trying to implement the GitHub strategy. The "Application name" is what the user will see when GitHub pops up and says, "Hey, is it okay if I give this application to some of your stuff?" The "Homepage URL" is going to show up and show who you are (you want these to be helpful to the user so they can trust you). For "Application description" you can put whatever you want (again, try to make it helpful). So we might have something like the following thus far:
+
+- Application name: `Movie App`
+- Homepage URL: `https://daniel-farlow.com/`
+- Application description: `We want your profile info for our movie fan site!`
+
+The "Authorization callback URL" is *not* for the user--it is for our application. It is absolutely critical that you use something that actually exists for this. For example:
+
+- Authorization callback URL: `http://localhost:3000/auth/github`
+
+The above line means we are going to need to set up a new route for `/auth`, but the point is that `http://localhost:3000/auth` is the *only* place that GitHub will send the user and the token after they have agreed to release some of their data. So you would obviously need to change `http://localhost:3000/auth/github` in production, but this is fine for our development purposes. Once you register the application you will be greeted with something like the following:
+
+<p align='center'>
+  <img width="400px" src='./images-for-notes/passport-github-credentials.png'>
+</p>
+
+So we have all three pieces for our application association with GitHub now:
+
+- `clientID`: `d1a4148a70a898ad092b`
+- `secret`: `90b5e06d0227dcbfd5750181f30a58de7c0755f8`
+- `callback`: `http://localhost:3000/auth/github`
+
+The `clientID` is what everyone can know about, but the `secret` is what you cannot let anyone see. Otherwise, it will compromise your application, and it will compromise your users. As said before, Passport is not a protocol but more so like a framework, meaning it's a way of doing things, but not every application is going to be exactly like this. But they will all be similar to this. So Facebook has a way for you to register your application and get the information above and for you to set your callback up. Google is the same way. Amazon is the same way. Etc. 
+
+If you want to remove everyone's token so you effectively log everyone out, you can "Revoke all user tokens". And if you want to reset your cleint secret you can do that as well (maybe you have a developer who left the team or whatever). 
+
+Returning to [usage of passport-github](http://www.passportjs.org/packages/passport-github/), we did the "create an application" part where we got our clientID and secret. Now we can look at the configuration strategy: "The GitHub authentication strategy authenticates users using a GitHub account and OAuth 2.0 tokens. The client ID and secret obtained when creating an application are supplied as options when creating the strategy. The strategy also requires a `verify` callback, which receives the access token and optional refresh token, as well as `profile` which contains the authenticated user's GitHub profile. The `verify` callback must call `cb` providing a user to complete authentication." We are then given an example:
+
+```javascript
+passport.use(new GitHubStrategy({
+    clientID: GITHUB_CLIENT_ID,
+    clientSecret: GITHUB_CLIENT_SECRET,
+    callbackURL: "http://127.0.0.1:3000/auth/github/callback"
+  },
+  function(accessToken, refreshToken, profile, cb) {
+    User.findOrCreate({ githubId: profile.id }, function (err, user) {
+      return cb(err, user);
+    });
+  }
+));
+```
+
+`passport.use` is a little like Express middleware. Anytime you use passport, namely `passport.authenticate`, that will cause the passport middleware referenced above to kick into gear. So we kind of have a middleware system inside of a middleware system, where passport is running inside of Express. We're actually going to take the code above and drop it into our `app.js` and drop it right below where we use `app.use(helmet())`. 
+
+From the code snippet above, we see what we talked about above that defines the association between our application and "the middleman" (in this case GitHub):
+
+- `clientID`
+- `clientSecret`
+- `callbackURL`
+
+We see that this information is passed in the form of an object as the first argument to our `GitHubStrategy` constructor, and the second argument is a function or callback to run which will get the `accessToken`, the `refreshToken`, the `profile` (i.e., the user's GitHub profile), and a callback `cb` to run. It's not uncommon to dump the first object into a `config.js` file:
+
+```javascript
+module.exports = {
+  clientID: 'd1a4148a70a898ad092b',
+  clientSecret: '90b5e06d0227dcbfd5750181f30a58de7c0755f8',
+  callbackURL: "http://localhost:3000/auth/github"
+}
+```
+
+Of course, make sure to now add `config.js` to your `.gitignore` file so no one will see this on GitHub. Depending on how many strategies or other configuration elements you may have, it's not unusual to have a `config` folder. You could imagine having a `config-github-passport.js` file in here, a `config-facebook-passport.js` file as well (where we would also `module.exports` the configuration data depending on how the Facebook strategy works), `.env` to house environment variables, etc. In any case, you would want to make sure you added the `config` *folder* or directory to your `.gitignore`. 
+
+So right now our entire `app.js` file might look something like this:
+
+```javascript
+// Native node modules
+const path = require('path');
+require('dotenv').config();
+
+// Third-part modules
+const express = require('express');
+const app = express();
+const createError = require('http-errors');
+const cookieParser = require('cookie-parser');
+const logger = require('morgan');
+const helmet = require('helmet');
+
+//=============== PASSPORT FILES ===============//
+const passport = require('passport');
+const GitHubStrategy = require('passport-github').Strategy;
+//==============================================//
+
+// Import custom routers
+const indexRouter = require('./routes/indexRouter');
+
+// Application settings
+app.set('views', path.join(__dirname, 'views'));
+app.set('view engine', 'ejs');
+
+// Application-level middleware
+app.use(helmet());
+
+//=============== PASSPORT CONFIG ===============//
+const passportConfig = require('./config');
+passport.use(new GitHubStrategy(passportConfig,
+  function (accessToken, refreshToken, profile, cb) {
+    console.log(profile)
+  }
+));
+//==============================================//
+
+app.use(logger('dev'));
+app.use(express.json());
+app.use(express.urlencoded({ extended: false }));
+app.use(cookieParser());
+app.use(express.static(path.join(__dirname, 'public')));
+
+// Use router middleware on specified paths
+app.use('/', indexRouter);
+
+// catch 404 and forward to error handler
+app.use(function(req, res, next) {
+  next(createError(404));
+});
+
+// error handler
+app.use(function(err, req, res, next) {
+  // set locals, only providing error in development
+  res.locals.message = err.message;
+  res.locals.error = req.app.get('env') === 'development' ? err : {};
+
+  // render the error page
+  res.status(err.status || 500);
+  res.render('error');
+});
+
+module.exports = app;
+```
+
+Of course, right now we are just logging to the console `profile` within `passport.use` (the boilerplate code is mongoose-speak), but we will fix that soon. Back in our `indexRouter.js` file, we can then add what we need:
+
+```javascript
+router.get('/login', passport.authenticate('github'));
+```
+
+We can now actually click to "Login with GitHub" in our application now, and GitHub will show up asking us to authorize them to hand over some of our data. If we click to authorize, then we will get a 404 error currently because GitHub will try to redirect us to where we specified in our `config.js`: `http://localhost:3000/auth/github`. But we don't have a `/auth` right now. You can click it and you can see where GitHub sends us: `http://localhost:3000/auth/github?code=d548d95367eb59467c8a`. GitHub did send us the code as part of the query string, and we'll figure out how to use that in just a second, but go back to your `indexRouter` and include the following:
+
+```javascript
+router.get('/login', passport.authenticate('github'));
+
+router.get('/auth/github', passport.authenticate('github', {
+  successRedirect: '/',
+  failureRedirect: '/loginFailed'
+}))
+```
+
+So we will use `router.get` and provide the route our `callbackURL` it is expected to go to, and we will call `passport.authenticate('github')` again, but this time we will also pass an object to `passport.authenticate`, indicating where the user should be redirected to upon successful log in or where they should be redirected to if it fails. 
+
+If we now click "Login with GitHub" then we don't go to the GitHub page again (because we've already given it permission) and the app is currently hanging (spinning wheel of death). But if we look in the Node console, then we will see that we have logged the profile. Cool! But let's return to the more important issue at hand: Why is our app currently hanging? If we jump back over to [the docs](http://www.passportjs.org/packages/passport-github/), then we will recall the following lines at the top of the section about configuration strategy: "The strategy also requires a `verify` callback, which receives the access token and optional refresh token, as well as `profile` which contains the authenticated user's GitHub profile. The `verify` callback must call `cb` providing a user to complete authentication." What's the `verify` callback? That's what the second argument (i.e., function) is to `new GitHubStrategy`. The first argument was the object containing our client ID, secret, and callback URL, but the second argument is the `verify` callback:
+
+```javascript
+const passportConfig = require('./config');
+passport.use(new GitHubStrategy(passportConfig,
+  function (accessToken, refreshToken, profile, cb) {
+    console.log(profile)
+  }
+));
+```
+
+The 
+
+```javascript
+function (accessToken, refreshToken, profile, cb) {
+  console.log(profile)
+}
+```
+
+is our `verify` callback. So once the user is finished authenticating, the `verify` callback is going to run (which is why we got the `profile` logged to the console just a moment ago). In the example code from the docs we saw
+
+```javascript
+User.findOrCreate({ githubId: profile.id }, function (err, user) {
+  return cb(err, user);
+});
+```
+
+which was relevant to mongoose, but we can still make sense of what is happening with `cb(err, user)`. We don't have an error or user to return, but we can return the `profile`:
+
+```javascript
+const passportConfig = require('./config');
+passport.use(new GitHubStrategy(passportConfig,
+  function (accessToken, refreshToken, profile, cb) {
+    return cb(null, profile)
+  }
+));
+```
+
+If we test this out now, we see we get a little bit further: our app doesn't hang! But it breaks:
+
+```
+passport.initialize() middleware not in use
+```
+
+Back in the [Configure](http://www.passportjs.org/docs/configure/) section of the main passport docs, if we scroll down to the "Verify Callback" section and look even further down to the "Middleware" subsection, we see the following: "In a Connect or Express-based application, `passport.initialize()` middleware is required to initialize Passport. If your application uses persistent login sessions, `passport.session()` middleware must also be used." (**NOTE:** Read the docs! As painful as it can be, it can ultimately save you from a world of hurt in the future.) 
+
+We can add `app.use(passport.initialize());` to the top of our passport configuration in `app.js`:
+
+```javascript
+//=============== PASSPORT CONFIG ===============//
+app.use(passport.initialize());
+const passportConfig = require('./config');
+passport.use(new GitHubStrategy(passportConfig,
+  function (accessToken, refreshToken, profile, cb) {
+    // console.log(profile)
+    return cb(null, profile)
+  }
+));
+//==============================================//
+```
+
+If we try this now, then we get yet another error:
+
+```
+Failed to serialize user into session
+```
+
+Well, the fix seems to be indicated by one of the lines we saw just above from the docs: "If your application uses persistent login sessions, `passport.session()` middleware must also be used." So maybe we can just drop `app.use(passport.session());` underneath `app.use(passport.initialize());` and be good to go. But we can't. That's not quite enough. To use `passport.session` we are going to need `express.session`, and that is actually [another node module](https://www.npmjs.com/package/express-session). From the NPM docs, we see this module allows us to use sessions inside of Express. It's session middleware. That's it. ("Create a session middleware with the given `options`," the NPM docs for `express-session` says.)
+
+If you don't know what sessions are, then hopefully you know what cookies are (previously covered in another note). Cookies store data on the browser, and you pass that data up every single time to the server. So every request all the cookie data gets sent up. One of the reasons browsers used to run so slowly in the old days was becauase cookies got massive and every single page load you sent up a huge payload. So there was a ton of bandwidth getting sucked up.
+
+Sessions are kind of the other side of that, where you store all the data on the server (as they note in the NPM docs, session data is *not* saved in the cookie itself, just the session ID; session data is stored server-side). So the actual session data is stored on the server, but you get a session ID which is stored in your cookies. So what the browser has is the key or sort of the ID (i.e., the session ID) and you send *that* up to the server and that's the only thing that will unlock your data. So the session data will allow you to hope from place to place to place, and even though you are making totally new requests, the user will have data that can be stored and persistent. 
+
+So we need to run a little 
+
+``` BASH
+npm install express-session
+```
+
+We can then `const session = require('express-session');` in our passport files in our `app.js`:
+
+```javascript
+//=============== PASSPORT FILES ===============//
+const session = require('express-session');
+const passport = require('passport');
+const GitHubStrategy = require('passport-github').Strategy;
+//==============================================//
+```
+
+We'll do this for right now, but just know `express-session` is capable of a lot more than just working with passport. Now, just underneath the [cookie.secure](https://www.npmjs.com/package/express-session#cookiesecure) section of the docs for `express-session` we see some options to pass to the `session` function we just imported above:
+
+```javascript
+app.use(session({
+  secret: 'keyboard cat',
+  resave: false,
+  saveUninitialized: true,
+  cookie: { secure: true }
+}))
+```
+
+In the object above we see a few different options, but the one we always have to pass is `secret`, and the `secret` key is simply "salt"; that is, it is just to make your session IDs harder to crack. It doesn't make any difference what you put there, but just don't use `keyboard cat` because that's in the docs, and that's probably the first thing a bad actor might try. The docs give more details on the other options, but we can plan on just copying and pasting the given object for now into our code directly at the top of our passport configuration section (and we can change our `secret` first):
+
+```javascript
+//=============== PASSPORT CONFIG ===============//
+app.use(session({
+  secret: 'I love Express!',
+  resave: false,
+  saveUninitialized: true,
+  cookie: { secure: true }
+}))
+app.use(passport.initialize());
+const passportConfig = require('./config');
+passport.use(new GitHubStrategy(passportConfig,
+  function (accessToken, refreshToken, profile, cb) {
+    // console.log(profile)
+    return cb(null, profile)
+  }
+));
+//==============================================//
+```
+
+The `app.use(session({ ... }));` sets up sessions so we can use sessions. This still doesn't quite get us there with Passport. We still get "Failure to serialize user into session." So again we hop back to [the docs](http://www.passportjs.org/docs/configure/) and right underneath the Middleware subsection of Configure we see another subsection of Sessions. We see the following: "In a typical web application, the credentials used to authenticate a user will only be transmitted during the login request. [This should make perfect sense because we don't want the username and password or whatever the authentication stuff is to be passed around anymore than is absolutely necessary. So when the user logs in that's the only time we're going to mess with that access token.] If authentication succeeds, a session will be established and maintained via a cookie set in the user's browser. [That's why we want the sessions!] Each subsequent request will not contain credentials [just as we noted above--we only want to mess around with authentication details when absolutely necessary], but rather the unique cookie that identifies the session [so that the server knows who this person/user is]. In order to support login sessions, Passport will serialize and deserialize `user` instances to and from the session."
+
+And we are then given the structure of the code needed to make this magic happen in large part:
+
+```javascript
+passport.serializeUser(function(user, done) {
+  done(null, user.id);
+});
+
+passport.deserializeUser(function(id, done) {
+  User.findById(id, function(err, user) {
+    done(err, user);
+  });
+});
+```
+
+In our application we will simply have the following at the bottom of our passport configuration:
+
+```javascript
+passport.serializeUser((user, cb) => {
+  cb(null, user);
+})
+passport.deserializeUser((user, cb) => {
+  cb(null, user);
+})
+```
+
+As can be seen above, it's exactly the same process both times. Because of the way data is stored inside of the session, it needs to be serialized. We should hopefully now not have the "Failure to serialize user into session" error we were just getting a moment ago. As our code is right now, if our page refreshes and no errors are thrown, then we should be good. But we don't really see anything happen so we have no idea what actually happened. If we take one last trip to [the docs](http://www.passportjs.org/docs/configure/), then we will see the following underneath code snippet referenced about user serialization and deserialization: "In this example, only the user ID is serialized to the session, keeping the amount of data stored within the session small [in the code snippet in the docs only `user.id` is being serialized whereas we are serializing the whole user `profile` ... which is obviously less small than just the user ID!]. When subsequent requests are received, this ID is used to find the user, which will be restored to `req.user`."
+
+So passport is creating `req.user` because of `serializeUser` and `deserializeUser`, which is happening as a result of all of our configuration and what not. Recall where we redirected the user after a successful authorization/login:
+
+```javascript
+router.get('/auth/github', passport.authenticate('github', {
+  successRedirect: '/',
+  failureRedirect: '/loginFailed'
+}))
+```
+
+So within `router.get('/', ...)` we can `console.log(req.user)` to see what shows up after attempting to log in. As soon as we are done authenticating, we have victory! Our user object, via `req.user` (which is created by passport), as sent back to us by GitHub, will be logged to the console. So we will have all of the user's public info. The good news is that as you go from place to place now this data will remain there because we have put it in a session. 
+
+We could set up a dummy route in our `indexRouter` to test this out:
+
+```javascript
+router.get('/favorites', (req, res, next) => {
+  res.json(req.user.displayName)
+})
+```
+
+After authenticating, we can click on different movies, search, and so forth. But we can always click on "Favorites" and the authenticated GitHub user name will display. One catch here, however, is that if the server restarts (e.g., if you are using `nodemon` and you make a change and save), then `displayName` will no longer be there because `req.user.displayName` is *session* data, and session data is stored on the server. So if you *restart* the server, then all the data gets wiped out for that session, and you have to start completely over. So keep that in mind as you do your development. But once your server is up and running and not expecting to restart, you should be in good shape. 
+
+---
+
+</details>
+
 
 
 
