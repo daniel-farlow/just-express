@@ -212,7 +212,7 @@ The "actual stuff" or what you may think of as maybe the content or HTML, the im
 
 </details>
 
-<details><summary> <strong>Node server without Express (the basics/fundamentals)</strong></summary>
+<details open><summary> <strong>Node server without Express (the basics/fundamentals)</strong></summary>
 
 <details><summary> TLDR Version</summary>
 
@@ -241,7 +241,7 @@ server.listen(3000);
 In setting up a Node server without Express, we use the following (all of which can be read up on through the links to the docs as noted above): 
 
 | Class | Syntax | Documentation |
-| --- | --- | :-: | --- |
+| --- | --- | :-: |
 | `N/A` | `http.createServer([options][, requestListener])` | [Link](https://nodejs.org/dist/latest-v12.x/docs/api/http.html#http_http_createserver_options_requestlistener) |
 | [`http.ServerResponse`](https://nodejs.org/dist/latest-v12.x/docs/api/http.html#http_class_http_serverresponse) | `response.writeHead(statusCode[, statusMessage][, headers])` | [Link](https://nodejs.org/dist/latest-v12.x/docs/api/http.html#http_response_writehead_statuscode_statusmessage_headers) |
 | [`http.ServerResponse`](https://nodejs.org/dist/latest-v12.x/docs/api/http.html#http_class_http_serverresponse) | `response.write(chunk[, encoding][, callback])` | [Link](https://nodejs.org/dist/latest-v12.x/docs/api/http.html#http_response_write_chunk_encoding_callback) |
