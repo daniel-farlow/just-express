@@ -212,7 +212,7 @@ The "actual stuff" or what you may think of as maybe the content or HTML, the im
 
 </details>
 
-<details open><summary> <strong>Node server without Express (the basics/fundamentals)</strong></summary>
+<details><summary> <strong>Node server without Express (the basics/fundamentals)</strong></summary>
 
 <details><summary> TLDR Version</summary>
 
