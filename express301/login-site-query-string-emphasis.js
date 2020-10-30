@@ -17,7 +17,7 @@ app.use(cookieParser());
 // Set default view engine and where views should be looked for by Express
 app.set('view engine', 'ejs');
 app.set('views', [
-  path.join(__dirname + '/views')
+  path.join(__dirname, 'views')
 ]);
 
 // Custom middleware run at the application level

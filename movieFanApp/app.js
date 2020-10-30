@@ -1,7 +1,7 @@
 // Native node modules
 const path = require('path');
 
-// Third-part modules
+// Third-party modules
 const express = require('express');
 const app = express();
 const createError = require('http-errors');

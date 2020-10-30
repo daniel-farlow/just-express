@@ -11,18 +11,18 @@ const cookieParser = require('cookie-parser');
 app.use(helmet());
 app.use(express.static('public'));
 app.use(express.json());
-app.use(express.urlencoded({extended: false}));
+app.use(express.urlencoded({ extended: false }));
 app.use(cookieParser());
 
 // Set default view engine and where views should be looked for by Express
 app.set('view engine', 'ejs');
 app.set('views', [
-  path.join(__dirname + '/views')
+  path.join(__dirname, 'views')
 ]);
 
 // Custom middleware run at the application level
 app.use((req, res, next) => {
-  if(req.query.msg === 'fail') {
+  if (req.query.msg === 'fail') {
     res.locals.msg = 'Sorry. This username and password combination does not exist.';
   } else {
     res.locals.msg = '';
@@ -65,14 +65,14 @@ app.param('generalStoryId', (req, res, next, generalStoryId) => {
     - We can then make use of our logic here in our desired route 
     - For example, you may want to set any number of local variables or whatever
   */
-  switch(true){
-    case(generalStoryId > 0 && generalStoryId < 366):
+  switch (true) {
+    case (generalStoryId > 0 && generalStoryId < 366):
       res.locals.storyType = 'daily';
       break
-    case(generalStoryId < 1000000):
+    case (generalStoryId < 1000000):
       res.locals.storyType = 'news';
       break
-    case(generalStoryId < 1000000000):
+    case (generalStoryId < 1000000000):
       res.locals.storyType = 'blog';
       break
     default:
@@ -88,25 +88,12 @@ app.get('/story/:generalStoryId', (req, res, next) => {
   // simulate dynamic link generation (would likely be a pull from a database)
   res.locals.restOfStoryLink = Math.random(); // <-- maybe something from DB
   res.locals.generalStoryId = generalStoryId;
-  switch(storyType){
-    case('daily'):
-      res.render('daily');
-      break;
-    case('news'):
-      res.render('news');
-      break;
-    case('blog'):
-      res.render('blog');
-      break;
-    default:
-      res.send(`<h1>Woops! Looks like this story does not exist.</h1>`)
-      break;
-  }
+  res.locals.storyType === '' ? res.send(`<h1>Whoops! This story does not exist.</h1>`) : res.render(storyType);
 })
 
 app.get('/story/:generalStoryId/:link', (req, res, next) => {
   console.log('The params: ', req.params)
-  const {generalStoryId, link} = req.params;
+  const { generalStoryId, link } = req.params;
   // the below would likely be res.render based on the link pulled from the DB somehow
   res.send(`<h1>This is the link: ${link}. You are now reading more about story ${generalStoryId}.</h1>`)
 })
@@ -114,7 +101,7 @@ app.get('/story/:generalStoryId/:link', (req, res, next) => {
 app.get('/statement', (req, res, next) => {
   // This will render the statement IN the browser which we do not want
   // res.sendFile(path.join(__dirname, 'userStatements/BankStatementAndChecking.png'))
-  const {username} = req.cookies;
+  const { username } = req.cookies;
   res.download(path.join(__dirname, 'userStatements/BankStatementAndChecking.png'), `${username}sStatement.png`)
 })
 

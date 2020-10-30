@@ -17,7 +17,7 @@ app.use(cookieParser());
 // Set default view engine and where views should be looked for by Express
 app.set('view engine', 'ejs');
 app.set('views', [
-  path.join(__dirname + '/views')
+  path.join(__dirname, 'views')
 ]);
 
 // Custom middleware run at the application level
@@ -88,20 +88,7 @@ app.get('/story/:generalStoryId', (req, res, next) => {
   // simulate dynamic link generation (would likely be a pull from a database)
   res.locals.restOfStoryLink = Math.random(); // <-- maybe something from DB
   res.locals.generalStoryId = generalStoryId;
-  switch(storyType){
-    case('daily'):
-      res.render('daily');
-      break;
-    case('news'):
-      res.render('news');
-      break;
-    case('blog'):
-      res.render('blog');
-      break;
-    default:
-      res.send(`<h1>Woops! Looks like this story does not exist.</h1>`)
-      break;
-  }
+  res.locals.storyType === '' ? res.send(`<h1>Whoops! This story does not exist.</h1>`) : res.render(storyType);
 })
 
 app.get('/story/:generalStoryId/:link', (req, res, next) => {

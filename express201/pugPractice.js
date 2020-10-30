@@ -11,7 +11,7 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 
 app.set('view engine', 'pug')
-app.set('views', path.join(__dirname, '/practice-views'))
+app.set('views', path.join(__dirname, 'practice-views'))
 
 app.get('/about', (req, res, next) => {
   res.render('about', {})
